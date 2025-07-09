@@ -1,205 +1,126 @@
-# OOPStracker Roadmap
+# OOPStracker Roadmap (Simplified)
 
 ## Project Overview
 
-**OOPStracker** is an AI Agent Code Loop Detection and Prevention Library designed to help AI agents avoid generating duplicate or redundant code. Initially created for Evocraft integration, it will be generalized for broader use cases.
+**OOPStracker** は、AIエージェントが同じコードを繰り返し生成することを防ぐためのシンプルなライブラリです。SHA-256ハッシュベースの完全一致検出に特化し、最低限の機能で実用的な重複検出を提供します。
 
-## Phase 1: Core Foundation (v0.1.0) ✅ CURRENT
+## 🎯 プロジェクトスコープ
 
-### Completed Features
-- [x] Basic code similarity detection using SHA-256 hashing
-- [x] **SimHash-based similarity detection with BK-tree for O(log n) performance**
-- [x] **FastAPI server for high-performance similarity search**
-- [x] SQLite database for code storage and retrieval with SimHash support
-- [x] Code normalization (comments removal, whitespace standardization)
-- [x] CLI interface for file scanning and management
-- [x] Python package structure with UV project setup
-- [x] Basic test coverage
-- [x] MIT license and open-source preparation
+**実装する機能（シンプルに保つ）:**
+- ✅ SHA-256ハッシュによる完全一致検出のみ
+- ✅ コメント除去・空白正規化
+- ✅ シンプルなSQLiteストレージ
+- ✅ Code-Smithからの簡単な呼び出しAPI
 
-### Key Components
-- **CodeMemory**: Main interface for code registration and duplicate detection
-- **SimHashSimilarityDetector**: High-performance similarity detection using SimHash + BK-tree
-- **BKTree**: Fast similarity search data structure for O(log n) performance
-- **FastAPI Server**: RESTful API for similarity search with 1-second response time target
-- **CodeNormalizer**: AST-based code normalization
-- **DatabaseManager**: SQLite operations and schema management
-- **CLI**: Command-line interface for file scanning and management
+**実装しない機能:**
+- ❌ SimHash（ファジーマッチング）
+- ❌ BK-tree（高度な検索）
+- ❌ 機械学習ベースの類似性検出
+- ❌ 多言語サポート
+- ❌ 分散システム対応
 
-## Phase 2: Evocraft Integration (v0.2.0) 🎯 NEXT
+## Current Status (2025年1月時点)
 
-### Planned Features
-- [ ] **EvocraftCodeGuard**: Specialized integration layer for Evocraft workflows
-- [ ] **Generation History Tracking**: Track AI code generation attempts and patterns
-- [ ] **Context-Aware Duplicate Detection**: Consider prompt context in similarity analysis
-- [ ] **Interactive Intervention**: Allow AI agents to modify prompts when duplicates detected
-- [ ] **Generation Statistics**: Provide metrics on code generation efficiency
+### 既に動作している機能
+- ✅ SHA-256ハッシュによる完全一致検出
+- ✅ コメント除去・空白正規化
+- ✅ SQLiteデータベース統合
+- ✅ 基本的なCLI
+- ✅ パフォーマンス: 良好（100件で0.038秒）
 
-### Integration Points
-- [ ] Pre-generation checks for similar code requests
-- [ ] Post-generation registration of successful code
-- [ ] Workflow integration with existing Evocraft tools
-- [ ] Configuration integration with Evocraft settings
+### 必要な作業
+- 🔧 Code-Smithとの統合インターフェース作成
+- 🔧 不要な複雑な機能の削除
+- 🔧 ドキュメントの簡素化
 
-### Success Metrics
-- Reduce redundant code generation by 70%
-- Improve AI agent efficiency by 40%
-- Provide actionable feedback for duplicate scenarios
+## Phase 1: 最小限の実装 (v0.1.0) ✅ DONE
 
-## Phase 3: Enhanced Similarity Detection (v0.3.0)
+現在のSHA-256ベースの実装で十分動作しています。
 
-### Advanced Detection Methods
-- [x] **SimHash Integration**: Fuzzy similarity matching for near-duplicates ✅
-- [x] **BK-tree Implementation**: O(log n) similarity search performance ✅
-- [x] **Multi-threshold Detection**: Configurable similarity thresholds ✅
-- [ ] **AST Structure Comparison**: Compare code structure beyond text similarity
-- [ ] **Semantic Analysis**: Understand functional equivalence
-- [ ] **Hybrid Similarity**: Combine multiple similarity methods
+## Phase 2: Code-Smith統合 (v0.2.0) 🎯 CURRENT
 
-### Performance Optimizations
-- [x] **High-performance API**: FastAPI server with 1-second response target ✅
-- [x] **Memory-based Search**: BK-tree for fast in-memory similarity search ✅
-- [x] **Database Optimization**: SimHash indexing and query optimization ✅
-- [ ] **Parallel Processing**: Speed up similarity checks for large codebases
-- [ ] **Caching Layer**: Cache normalized code and similarity results
-- [ ] **Memory Management**: Efficient handling of large code repositories
+### やること（1週間以内）
+1. **シンプルな統合インターフェース作成**
+   ```python
+   # main.pyに追加
+   from oopstracker import CodeMemory
+   
+   class CodeSmithTracker:
+       def __init__(self):
+           self.memory = CodeMemory()
+       
+       def check_duplicate(self, code: str) -> bool:
+           return self.memory.is_duplicate(code).is_duplicate
+       
+       def register_code(self, code: str, context: dict):
+           self.memory.register(code, **context)
+   ```
 
-## Phase 4: Generalization and Extensibility (v0.4.0)
+2. **不要なコードの削除**
+   - SimHash関連コードの削除
+   - BK-tree関連コードの削除
+   - 複雑なAPI機能の削除
 
-### Framework-Agnostic Features
-- [ ] **Plugin Architecture**: Support for custom similarity algorithms
-- [ ] **Multi-Language Support**: Beyond Python (JavaScript, Java, C++)
-- [ ] **API Integration**: RESTful API for external tool integration
-- [ ] **Configuration Management**: Flexible configuration system
+3. **最小限のドキュメント**
+   - 基本的な使い方のREADME
+   - Code-Smithとの統合例
 
-### Advanced Use Cases
-- [ ] **Code Review Integration**: Detect duplicate code in pull requests
-- [ ] **Continuous Integration**: Automated duplicate detection in CI/CD pipelines
-- [ ] **IDE Extensions**: VS Code, PyCharm, and other IDE integrations
-- [ ] **Git Hooks**: Pre-commit duplicate detection
+## Phase 3: 実運用での改善 (v0.3.0) 
 
-## Phase 5: Production Readiness (v1.0.0)
+### 実際に使ってみてから検討
+- Code-Smithでの実運用フィードバック
+- パフォーマンスボトルネックの特定
+- ユーザビリティの改善
 
-### Scalability and Reliability
-- [ ] **Distributed Storage**: Support for distributed databases
-- [ ] **High Availability**: Failover and redundancy mechanisms
-- [ ] **Performance Monitoring**: Metrics and alerting
-- [ ] **Security Hardening**: Secure code storage and transmission
+## Future Considerations (将来的に必要になったら検討)
 
-### Enterprise Features
-- [ ] **Multi-tenant Support**: Organization-level isolation
-- [ ] **Role-based Access Control**: User permissions and access management
-- [ ] **Audit Logging**: Comprehensive activity tracking
-- [ ] **Compliance Features**: Data retention and privacy controls
+- ファジーマッチング（SimHash）
+- 高度な検索アルゴリズム（BK-tree）
+- 機械学習ベースの検出
+- 多言語サポート
+- 分散システム対応
 
-## Phase 6: Ecosystem Integration (v1.1.0+)
+**重要**: これらの機能は現時点では実装しません。まずはシンプルなハッシュベースの検出で実用性を確認します。
 
-### AI/ML Platform Integration
-- [ ] **LangChain Integration**: Native support for LangChain workflows
-- [ ] **Hugging Face Integration**: Model-specific duplicate detection
-- [ ] **OpenAI API Integration**: GPT-specific optimization
-- [ ] **AutoGPT Integration**: Autonomous agent loop prevention
+## メンテナンス方針
 
-### Development Tool Integration
-- [ ] **GitHub Actions**: Automated duplicate detection workflows
-- [ ] **Jenkins Integration**: CI/CD pipeline integration
-- [ ] **Docker Support**: Containerized deployment options
-- [ ] **Kubernetes Operators**: Cloud-native deployment
+### シンプルに保つ
+- 複雑な機能は追加しない
+- 依存関係は最小限に
+- コードは読みやすく保つ
 
-## Technical Debt and Maintenance
+### 必要最小限のメンテナンス
+- セキュリティアップデートのみ対応
+- 重大なバグのみ修正
+- ドキュメントは基本的な使い方のみ
 
-### Current Technical Debt
-- [ ] Improve error handling and validation
-- [ ] Add comprehensive logging and monitoring
-- [ ] Optimize database queries and schema
-- [ ] Enhance test coverage (target: 90%+)
+## 成功の定義
 
-### Ongoing Maintenance
-- [ ] Regular dependency updates
-- [ ] Security vulnerability scanning
-- [ ] Performance regression testing
-- [ ] Documentation updates and improvements
+### シンプルな指標
+- ✅ Code-Smithで実際に使える
+- ✅ 誤検出が少ない（同じコードは確実に検出）
+- ✅ 高速（100ms以内で応答）
+- ✅ メンテナンスが簡単
 
-## Community and Ecosystem
+## タイムライン（シンプル版）
 
-### Open Source Development
-- [ ] **Contributor Guidelines**: Clear contribution process
-- [ ] **Issue Templates**: Standardized bug reports and feature requests
-- [ ] **Code of Conduct**: Community standards and enforcement
-- [ ] **Release Management**: Semantic versioning and changelog maintenance
+### 2025年1月第3週
+- [ ] Code-Smith統合インターフェース作成
+- [ ] 不要なコード削除
 
-### Documentation and Support
-- [ ] **User Documentation**: Comprehensive guides and tutorials
-- [ ] **API Documentation**: Auto-generated API references
-- [ ] **Video Tutorials**: Visual learning resources
-- [ ] **Community Forum**: User support and discussion platform
+### 2025年1月第4週  
+- [ ] 基本的な統合テスト
+- [ ] README更新
 
-## Success Metrics and KPIs
+### 2025年2月以降
+- 実運用でのフィードバック収集
+- 必要に応じて微調整
 
-### Performance Metrics
-- **Detection Accuracy**: >95% true positive rate for duplicates
-- **False Positive Rate**: <5% false duplicate detection
-- **Processing Speed**: <1 second for 10,000-record similarity search (achieved with BK-tree)
-- **API Response Time**: <1 second for similarity search on 10,000 records
-- **Memory Usage**: <100MB for typical usage scenarios
-- **Search Complexity**: O(log n) with BK-tree vs O(n) with linear search
+## まとめ
 
-### Adoption Metrics
-- **PyPI Downloads**: Target 10K+ monthly downloads by v1.0
-- **GitHub Stars**: Target 1K+ stars by v1.0
-- **Integration Adoption**: Integration with 5+ major AI/ML platforms
-- **Community Contributions**: 50+ external contributors
-
-## Risk Assessment and Mitigation
-
-### Technical Risks
-- **Scalability Bottlenecks**: Mitigate with distributed architecture
-- **Algorithm Accuracy**: Continuous improvement through ML techniques
-- **Performance Degradation**: Regular benchmarking and optimization
-- **Security Vulnerabilities**: Automated security scanning and updates
-
-### Market Risks
-- **Competition**: Differentiate through AI-specific features
-- **Technology Changes**: Adapt to new AI/ML paradigms
-- **User Adoption**: Focus on developer experience and integration ease
-- **Funding**: Sustainable open-source development model
-
-## Timeline and Milestones
-
-### 2024 Q4
-- [x] Phase 1 completion (v0.1.0)
-- [ ] Phase 2 initiation (Evocraft integration)
-
-### 2025 Q1
-- [ ] Phase 2 completion (v0.2.0)
-- [ ] Phase 3 initiation (Enhanced similarity)
-
-### 2025 Q2
-- [ ] Phase 3 completion (v0.3.0)
-- [ ] Phase 4 initiation (Generalization)
-
-### 2025 Q3
-- [ ] Phase 4 completion (v0.4.0)
-- [ ] Phase 5 initiation (Production readiness)
-
-### 2025 Q4
-- [ ] Phase 5 completion (v1.0.0)
-- [ ] Phase 6 initiation (Ecosystem integration)
-
-## Contributing
-
-This roadmap is living document that evolves with the project. Community input and contributions are welcome through:
-
-- **GitHub Issues**: Feature requests and bug reports
-- **Pull Requests**: Code contributions and improvements
-- **Discussions**: Architecture and design discussions
-- **Documentation**: User guides and API documentation
-
-## License
-
-OOPStracker is released under the MIT License, enabling broad adoption and contribution from the open-source community.
+OOPStrackerは、AIエージェントのコード重複を防ぐ**シンプルで実用的な**ツールを目指します。複雑な機能は後回しにして、まずは確実に動作する最小限の実装でCode-Smithプロジェクトに貢献します。
 
 ---
 
-*Last updated: December 2024*
-*Next review: March 2025*
+*Last updated: 2025年1月*
+*Scope: ハッシュベースの検出のみ*
