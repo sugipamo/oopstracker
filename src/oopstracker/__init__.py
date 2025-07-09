@@ -11,14 +11,13 @@ __author__ = "EvoCode Team"
 __email__ = "info@evocoder.ai"
 __license__ = "MIT"
 
-from .core import CodeMemory, CodeSimilarityDetector
+from .core import CodeMemory
 from .models import CodeRecord, SimilarityResult
 from .exceptions import OOPSTrackerError, DatabaseError, ValidationError
 from .simhash_detector import SimHashSimilarityDetector, BKTree
 
 __all__ = [
     "CodeMemory",
-    "CodeSimilarityDetector",
     "SimHashSimilarityDetector",
     "BKTree",
     "CodeRecord",

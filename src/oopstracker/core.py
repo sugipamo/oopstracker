@@ -13,6 +13,7 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from .models import CodeRecord, SimilarityResult, DatabaseConfig
 from .exceptions import DatabaseError, ValidationError, CodeAnalysisError
+from .simhash_detector import SimHashSimilarityDetector
 
 
 class CodeNormalizer:
@@ -90,13 +91,13 @@ class DatabaseManager:
                 file_path TEXT,
                 timestamp TEXT NOT NULL,
                 metadata TEXT,
-                simhash INTEGER
+                simhash TEXT
             )
         ''')
         
         # Add simhash column if it doesn't exist (for existing databases)
         try:
-            conn.execute('ALTER TABLE code_records ADD COLUMN simhash INTEGER')
+            conn.execute('ALTER TABLE code_records ADD COLUMN simhash TEXT')
         except sqlite3.OperationalError:
             # Column already exists, ignore
             pass
@@ -132,7 +133,7 @@ class DatabaseManager:
                     record.file_path,
                     record.timestamp.isoformat(),
                     str(record.metadata) if record.metadata else None,
-                    record.simhash
+                    str(record.simhash) if record.simhash is not None else None
                 ))
                 
                 record.id = cursor.lastrowid
@@ -162,16 +163,22 @@ class DatabaseManager:
         except sqlite3.Error as e:
             raise DatabaseError(f"Failed to find record by hash: {e}")
     
-    def find_similar(self, code_hash: str, threshold: float = 1.0) -> List[CodeRecord]:
-        """Find similar code records."""
-        # For now, only exact matches (threshold = 1.0)
-        # TODO: Implement fuzzy matching for threshold < 1.0
-        if threshold >= 1.0:
-            record = self.find_by_hash(code_hash)
-            return [record] if record else []
-        else:
-            # TODO: Implement SimHash or other similarity matching
-            return []
+    def find_by_simhash(self, simhash: int) -> List[CodeRecord]:
+        """Find code records with exact SimHash match."""
+        try:
+            with sqlite3.connect(self.config.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, code_hash, code_content, normalized_code, function_name, 
+                           file_path, timestamp, metadata, simhash
+                    FROM code_records 
+                    WHERE simhash = ?
+                ''', (str(simhash),))
+                
+                return [self._row_to_record(row) for row in cursor.fetchall()]
+                
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Failed to find records by simhash: {e}")
     
     def get_all_records(self) -> List[CodeRecord]:
         """Get all code records."""
@@ -201,49 +208,24 @@ class DatabaseManager:
             file_path=row[5],
             timestamp=datetime.fromisoformat(row[6]),
             metadata=eval(row[7]) if row[7] else {},
-            simhash=row[8] if len(row) > 8 else None
+            simhash=int(row[8]) if len(row) > 8 and row[8] is not None else None
         )
 
 
-class CodeSimilarityDetector:
-    """Detects code similarity using various methods."""
-    
-    def __init__(self, threshold: float = 1.0):
-        self.threshold = threshold
-        self.normalizer = CodeNormalizer()
-        self.logger = logging.getLogger(__name__)
-    
-    def analyze_similarity(self, code1: str, code2: str) -> float:
-        """Analyze similarity between two code snippets."""
-        try:
-            normalized1 = self.normalizer.normalize_code(code1)
-            normalized2 = self.normalizer.normalize_code(code2)
-            
-            # Simple exact match for now
-            if normalized1 == normalized2:
-                return 1.0
-            else:
-                return 0.0
-                
-        except Exception as e:
-            self.logger.error(f"Similarity analysis failed: {e}")
-            return 0.0
-    
-    def is_duplicate(self, code1: str, code2: str) -> bool:
-        """Check if two code snippets are duplicates."""
-        similarity = self.analyze_similarity(code1, code2)
-        return similarity >= self.threshold
 
 
 class CodeMemory:
-    """Main class for code memory management."""
+    """Main class for code memory management using SimHash-based similarity detection."""
     
-    def __init__(self, db_path: str = "oopstracker.db", threshold: float = 1.0):
+    def __init__(self, db_path: str = "oopstracker.db", threshold: int = 10):
         self.config = DatabaseConfig(db_path=db_path)
         self.db_manager = DatabaseManager(self.config)
-        self.similarity_detector = CodeSimilarityDetector(threshold=threshold)
+        self.similarity_detector = SimHashSimilarityDetector(threshold=threshold)
         self.normalizer = CodeNormalizer()
         self.logger = logging.getLogger(__name__)
+        
+        # Load existing records into SimHash detector
+        self._load_existing_records()
     
     def register(self, code: str, function_name: Optional[str] = None, 
                  file_path: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> CodeRecord:
@@ -264,11 +246,15 @@ class CodeMemory:
                 metadata=metadata or {}
             )
             
-            # Generate hash
+            # Generate hash and SimHash
             record.generate_hash()
+            record.simhash = self.similarity_detector.calculate_simhash(code)
             
             # Insert into database
             self.db_manager.insert_record(record)
+            
+            # Add to SimHash detector
+            self.similarity_detector.add_record(record)
             
             self.logger.info(f"Registered code record with hash: {record.code_hash}")
             return record
@@ -278,34 +264,14 @@ class CodeMemory:
             raise
     
     def is_duplicate(self, code: str) -> SimilarityResult:
-        """Check if code is a duplicate of existing code."""
+        """Check if code is a duplicate of existing code using SimHash similarity."""
         if not code or not code.strip():
             raise ValidationError("Code content cannot be empty")
         
         try:
-            # Normalize and hash the code
-            normalized_code = self.normalizer.normalize_code(code)
-            code_hash = hashlib.sha256(normalized_code.encode('utf-8')).hexdigest()
-            
-            # Find similar records
-            matched_records = self.db_manager.find_similar(
-                code_hash, 
-                threshold=self.similarity_detector.threshold
-            )
-            
-            # Determine if it's a duplicate
-            is_duplicate = len(matched_records) > 0
-            similarity_score = 1.0 if is_duplicate else 0.0
-            
-            result = SimilarityResult(
-                is_duplicate=is_duplicate,
-                similarity_score=similarity_score,
-                matched_records=matched_records,
-                analysis_method="sha256",
-                threshold=self.similarity_detector.threshold
-            )
-            
-            self.logger.info(f"Duplicate check result: {is_duplicate} (score: {similarity_score})")
+            # Use SimHash for similarity detection
+            result = self.similarity_detector.find_similar(code)
+            self.logger.info(f"SimHash duplicate check result: {result.is_duplicate} (score: {result.similarity_score})")
             return result
             
         except Exception as e:
@@ -325,3 +291,23 @@ class CodeMemory:
         except Exception as e:
             self.logger.error(f"Failed to clear memory: {e}")
             raise DatabaseError(f"Failed to clear memory: {e}")
+    
+    def _load_existing_records(self):
+        """Load existing records from database into SimHash detector."""
+        try:
+            records = self.db_manager.get_all_records()
+            for record in records:
+                if record.simhash is None:
+                    # Calculate SimHash for records that don't have it
+                    record.simhash = self.similarity_detector.calculate_simhash(record.code_content)
+                    # Update record in database
+                    self.db_manager.insert_record(record)
+                
+                # Add to SimHash detector
+                self.similarity_detector.add_record(record)
+            
+            self.logger.info(f"Loaded {len(records)} existing records into SimHash detector")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load existing records: {e}")
+            # Continue anyway - this is not critical

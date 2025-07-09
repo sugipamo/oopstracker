@@ -8,7 +8,8 @@ from simhash import Simhash
 import logging
 
 from .models import CodeRecord, SimilarityResult
-from .core import CodeNormalizer
+# Moved CodeNormalizer import to avoid circular import
+import ast
 from .exceptions import CodeAnalysisError
 
 
@@ -156,15 +157,49 @@ class SimHashSimilarityDetector:
             threshold: Maximum Hamming distance to consider as similar (default: 5)
         """
         self.threshold = threshold
-        self.normalizer = CodeNormalizer()
         self.bk_tree = BKTree()
         self.logger = logging.getLogger(__name__)
+    
+    def _normalize_code(self, code: str) -> str:
+        """Normalize code by removing comments, extra whitespace, and standardizing format."""
+        try:
+            # Remove comments
+            code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+            
+            # Parse and reformat with AST
+            tree = ast.parse(code)
+            normalized = ast.unparse(tree)
+            
+            # Remove extra whitespace
+            normalized = re.sub(r'\s+', ' ', normalized)
+            normalized = normalized.strip()
+            
+            return normalized
+            
+        except SyntaxError as e:
+            self.logger.warning(f"Code normalization failed due to syntax error: {e}")
+            # Fallback to basic normalization
+            return self._basic_normalize(code)
+        except Exception as e:
+            self.logger.error(f"Code normalization failed: {e}")
+            raise CodeAnalysisError(f"Failed to normalize code: {e}")
+    
+    def _basic_normalize(self, code: str) -> str:
+        """Basic normalization fallback."""
+        # Remove comments
+        code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+        
+        # Remove extra whitespace
+        code = re.sub(r'\s+', ' ', code)
+        code = code.strip()
+        
+        return code
     
     def _extract_features(self, code: str) -> List[str]:
         """Extract features from code for SimHash calculation."""
         try:
             # Normalize the code first
-            normalized = self.normalizer.normalize_code(code)
+            normalized = self._normalize_code(code)
             
             # Extract features: words, operators, keywords
             features = []
