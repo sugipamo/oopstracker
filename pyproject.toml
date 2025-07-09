@@ -32,12 +32,15 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.8.1"
+requires-python = ">=3.12"
 dependencies = [
-    "typing-extensions>=4.0.0; python_version<'3.9'",
     "simhash>=2.0.0",
     "fastapi>=0.116.0",
     "uvicorn>=0.33.0",
+    "xxhash>=3.4.0",
+    "pydantic>=2.0.0",
+    "tqdm>=4.65.0",
+    "colorama>=0.4.6",
 ]
 
 [project.optional-dependencies]
@@ -85,7 +88,7 @@ packages = ["src/oopstracker"]
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -107,7 +110,7 @@ line_length = 88
 multi_line_output = 3
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

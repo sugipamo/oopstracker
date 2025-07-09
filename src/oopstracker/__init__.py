@@ -15,6 +15,7 @@ from .core import CodeMemory
 from .models import CodeRecord, SimilarityResult
 from .exceptions import OOPSTrackerError, DatabaseError, ValidationError
 from .simhash_detector import SimHashSimilarityDetector, BKTree
+from .hybrid_detector import HybridCodeMemory, HybridResult, create_hybrid_memory
 
 __all__ = [
     "CodeMemory",
@@ -25,4 +26,7 @@ __all__ = [
     "OOPSTrackerError",
     "DatabaseError",
     "ValidationError",
+    "HybridCodeMemory",
+    "HybridResult",
+    "create_hybrid_memory",
 ]
