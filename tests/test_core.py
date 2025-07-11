@@ -206,7 +206,7 @@ class TestCodeMemory:
     def test_register_with_metadata(self):
         """Test registering code with metadata."""
         code = 'def hello(): print("Hello")'
-        metadata = {"author": "test", "version": "1.0"}
+        metadata = {"author": "test_user", "version": "1.0"}
         
         record = self.memory.register(
             code,

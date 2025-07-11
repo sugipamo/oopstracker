@@ -35,13 +35,13 @@ class TestFastAPISimple:
             text="def hello(): pass",
             function_name="hello",
             file_path="test.py",
-            metadata={"author": "test"}
+            metadata={"author": "test_user"}
         )
         
         assert request.text == "def hello(): pass"
         assert request.function_name == "hello"
         assert request.file_path == "test.py"
-        assert request.metadata == {"author": "test"}
+        assert request.metadata == {"author": "test_user"}
         
         # Test InsertResponse
         response = InsertResponse(id=1, status="ok", simhash=123456)
