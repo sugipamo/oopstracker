@@ -9,55 +9,126 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from .core import CodeMemory
 from .models import CodeRecord
 from .exceptions import OOPSTrackerError
+from .ignore_patterns import IgnorePatterns
+from .ast_simhash_detector import ASTSimHashDetector
 
 
 def setup_logging(level: str = "INFO"):
     """Set up logging configuration."""
-    logging.basicConfig(
-        level=getattr(logging, level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # Create a custom formatter that shortens module names
+    class ShortNameFormatter(logging.Formatter):
+        def format(self, record):
+            # Shorten the logger name to just the last component
+            parts = record.name.split('.')
+            if len(parts) > 1:
+                record.short_name = parts[-1]
+            else:
+                record.short_name = record.name
+            return super().format(record)
+    
+    # Configure root logger
+    handler = logging.StreamHandler()
+    
+    # Only show timestamps and messages for INFO level, more detail for DEBUG
+    if level.upper() == "INFO":
+        # Simplified format for INFO level
+        formatter = ShortNameFormatter('%(message)s')
+    else:
+        # More detailed format for DEBUG level
+        formatter = ShortNameFormatter('%(asctime)s - %(short_name)s - %(levelname)s - %(message)s')
+    
+    handler.setFormatter(formatter)
+    
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level.upper()))
+    root_logger.handlers = []  # Clear existing handlers
+    root_logger.addHandler(handler)
+    
+    # Suppress verbose logging from specific modules in INFO mode
+    if level.upper() == "INFO":
+        logging.getLogger('oopstracker.ast_simhash_detector').setLevel(logging.WARNING)
+        logging.getLogger('oopstracker.ast_database').setLevel(logging.WARNING)
+        logging.getLogger('oopstracker.ignore_patterns').setLevel(logging.WARNING)
 
 
-def scan_file(file_path: str, memory: CodeMemory) -> List[CodeRecord]:
-    """Scan a single file for code registration."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            code = f.read()
-        
-        # Check if duplicate
-        result = memory.is_duplicate(code)
-        if result.is_duplicate:
-            print(f"⚠️  DUPLICATE detected in {file_path}")
-            for record in result.matched_records:
-                print(f"   Similar to: {record.file_path} (recorded: {record.timestamp})")
-            return []
-        else:
-            # Register new code
-            record = memory.register(code, file_path=file_path)
-            print(f"✅ Registered: {file_path}")
-            return [record]
-            
-    except Exception as e:
-        print(f"❌ Error scanning {file_path}: {e}")
+def format_file_size(size_bytes: int) -> str:
+    """Format file size in human readable format."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f}{unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f}TB"
+
+
+def scan_file(file_path: str, detector: ASTSimHashDetector) -> List[CodeRecord]:
+    """AST-based file scanning."""
+    # Register all code units from file
+    records = detector.register_file(file_path)
+    
+    if not records:
+        print(f"⚠️  No code units found in {file_path}")
         return []
+    
+    # Check for duplicates among the newly registered units
+    duplicate_count = 0
+    for record in records:
+        if record.metadata and record.metadata.get('type') == 'module':
+            continue  # Skip module-level checks
+        
+        # Find similar units
+        unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
+        result = detector.find_similar(record.code_content, record.function_name, file_path)
+        
+        if result.is_duplicate and result.matched_records:
+            duplicate_count += 1
+            print(f"⚠️  DUPLICATE {unit_type} '{record.function_name or 'N/A'}' in {file_path}")
+            for matched in result.matched_records[:3]:  # Show top 3 matches
+                similarity = matched.similarity_score or 0
+                matched_file = matched.file_path or 'N/A'
+                matched_name = matched.function_name or 'N/A'
+                print(f"   Similar to: {matched_name} in {matched_file} (similarity: {similarity:.3f})")
+    
+    total_units = len(records)
+    unique_units = total_units - duplicate_count
+    
+    if duplicate_count > 0:
+        print(f"✅ Registered {total_units} units from {file_path} (⚠️ {duplicate_count} duplicates found)")
+    else:
+        print(f"✅ Registered {total_units} units from {file_path}")
+    
+    return records
 
 
-def scan_directory(directory: str, memory: CodeMemory, pattern: str = "*.py") -> List[CodeRecord]:
+def scan_directory(directory: str, detector: ASTSimHashDetector,
+                  pattern: str = "*.py", ignore_patterns: Optional[IgnorePatterns] = None) -> List[CodeRecord]:
     """Scan a directory for Python files."""
     path = Path(directory)
     if not path.exists():
         print(f"❌ Directory does not exist: {directory}")
         return []
     
+    # Initialize ignore patterns if not provided
+    if ignore_patterns is None:
+        ignore_patterns = IgnorePatterns(project_root=directory)
+    
     records = []
+    scanned_count = 0
+    ignored_count = 0
+    
     for file_path in path.rglob(pattern):
         if file_path.is_file():
-            records.extend(scan_file(str(file_path), memory))
+            if ignore_patterns.should_ignore(file_path):
+                ignored_count += 1
+                continue
+            
+            scanned_count += 1
+            file_records = scan_file(str(file_path), detector)
+            records.extend(file_records)
     
+    print(f"📊 Scanned {scanned_count} files, ignored {ignored_count} files")
     return records
 
 
@@ -72,10 +143,16 @@ def main():
         help="Database file path (default: oopstracker.db)"
     )
     parser.add_argument(
-        "--threshold", "-t",
+        "--hamming-threshold", "-t",
+        type=int,
+        default=10,
+        help="Hamming distance threshold for AST SimHash (default: 10)"
+    )
+    parser.add_argument(
+        "--similarity-threshold", "-s",
         type=float,
-        default=1.0,
-        help="Similarity threshold (default: 1.0)"
+        default=0.7,
+        help="Structural similarity threshold (default: 0.7)"
     )
     parser.add_argument(
         "--log-level", "-l",
@@ -97,12 +174,53 @@ def main():
         default="*.py",
         help="File pattern to match (default: *.py)"
     )
+    scan_parser.add_argument(
+        "--ignore-file", "-i",
+        help="Path to ignore file (default: .oopsignore)"
+    )
+    scan_parser.add_argument(
+        "--no-ignore",
+        action="store_true",
+        help="Disable all ignore patterns (scan all files)"
+    )
+    scan_parser.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="Don't respect .gitignore files (still use other ignore patterns)"
+    )
+    scan_parser.add_argument(
+        "--show-ignored",
+        action="store_true",
+        help="Show files that are being ignored"
+    )
     
-    # Check command
-    check_parser = subparsers.add_parser("check", help="Check a single code snippet")
+    # Check command (unified scan + detect)
+    check_parser = subparsers.add_parser("check", help="Scan directory and check for duplicates")
     check_parser.add_argument(
-        "code",
-        help="Code snippet to check"
+        "path",
+        nargs="?",
+        default=".",
+        help="Directory or file to check (default: current directory)"
+    )
+    check_parser.add_argument(
+        "--pattern", "-p",
+        default="*.py",
+        help="File pattern to match (default: *.py)"
+    )
+    check_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-scan all files (ignore cache)"
+    )
+    check_parser.add_argument(
+        "--no-gitignore",
+        action="store_true",
+        help="Don't respect .gitignore files"
+    )
+    check_parser.add_argument(
+        "--show-all",
+        action="store_true",
+        help="Show all duplicates, not just new ones"
     )
     
     # Register command
@@ -124,9 +242,25 @@ def main():
     list_parser = subparsers.add_parser("list", help="List all registered code")
     list_parser.add_argument(
         "--format", "-f",
-        choices=["table", "json"],
+        choices=["table", "json", "detailed"],
         default="table",
         help="Output format (default: table)"
+    )
+    list_parser.add_argument(
+        "--show-code", "-c",
+        action="store_true",
+        help="Show code snippets in output"
+    )
+    list_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        help="Limit number of records to show"
+    )
+    list_parser.add_argument(
+        "--sort-by", "-s",
+        choices=["timestamp", "function", "file", "hash"],
+        default="timestamp",
+        help="Sort records by field (default: timestamp)"
     )
     
     # Clear command
@@ -137,14 +271,101 @@ def main():
         help="Skip confirmation prompt"
     )
     
+    # AST analyze command
+    analyze_parser = subparsers.add_parser("analyze", help="Analyze code structure (AST mode only)")
+    analyze_parser.add_argument(
+        "code",
+        help="Code to analyze"
+    )
+    analyze_parser.add_argument(
+        "--file-path", "-F",
+        help="File path for context"
+    )
+    
+    # Find duplicates command
+    duplicates_parser = subparsers.add_parser("duplicates", help="Find potential duplicates (AST mode only)")
+    duplicates_parser.add_argument(
+        "--threshold", "-t",
+        type=float,
+        default=0.8,
+        help="Similarity threshold (default: 0.8)"
+    )
+    duplicates_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=20,
+        help="Maximum number of pairs to show (default: 20)"
+    )
+    
+    # Relations command
+    relations_parser = subparsers.add_parser("relations", help="Show relationships between code units")
+    relations_parser.add_argument(
+        "--hash", 
+        help="Code hash to find relations for (if not provided, shows overall graph stats)"
+    )
+    relations_parser.add_argument(
+        "--threshold", "-t",
+        type=float,
+        default=0.3,
+        help="Similarity threshold for connections (default: 0.3)"
+    )
+    relations_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=10,
+        help="Maximum number of related items to show (default: 10)"
+    )
+    relations_parser.add_argument(
+        "--graph",
+        action="store_true",
+        help="Show graph structure instead of specific relations"
+    )
+    relations_parser.add_argument(
+        "--fast",
+        action="store_true",
+        default=True,
+        help="Use fast SimHash filtering (default: True)"
+    )
+    relations_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Use full O(n²) computation for maximum accuracy"
+    )
+    relations_parser.add_argument(
+        "--auto",
+        action="store_true",
+        default=True,
+        help="Automatically find optimal threshold using adaptive search (default: True)"
+    )
+    relations_parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="Use manual threshold instead of automatic search"
+    )
+    relations_parser.add_argument(
+        "--target",
+        type=int,
+        default=200,
+        help="Target number of connections for auto mode (default: 200)"
+    )
+    relations_parser.add_argument(
+        "--max-connections",
+        type=int,
+        default=1000,
+        help="Maximum connections before stopping in auto mode (default: 1000)"
+    )
+    
     args = parser.parse_args()
     
     # Set up logging
     setup_logging(args.log_level)
     
-    # Initialize code memory
+    # Initialize AST detector
     try:
-        memory = CodeMemory(db_path=args.db, threshold=args.threshold)
+        detector = ASTSimHashDetector(hamming_threshold=args.hamming_threshold)
+        # Only show initialization message in verbose mode
+        if args.log_level == "DEBUG":
+            print(f"🧠 AST-based structural analysis (hamming threshold: {args.hamming_threshold})")
     except Exception as e:
         print(f"❌ Failed to initialize OOPStracker: {e}")
         sys.exit(1)
@@ -153,47 +374,256 @@ def main():
     try:
         if args.command == "scan":
             path = Path(args.path)
+            
+            # Initialize ignore patterns
+            ignore_patterns = None
+            if not args.no_ignore:
+                use_gitignore = not args.no_gitignore
+                ignore_patterns = IgnorePatterns(
+                    ignore_file=args.ignore_file,
+                    project_root=str(path.parent if path.is_file() else path),
+                    use_gitignore=use_gitignore
+                )
+                
+                if args.show_ignored:
+                    print("🚫 Using ignore patterns:")
+                    ignore_patterns.print_patterns()
+                    print()
+            
             if path.is_file():
-                records = scan_file(str(path), memory)
+                # Check if single file should be ignored
+                if ignore_patterns and ignore_patterns.should_ignore(path):
+                    print(f"🚫 File ignored by patterns: {path}")
+                    records = []
+                else:
+                    records = scan_file(str(path), detector)
             elif path.is_dir():
-                records = scan_directory(str(path), memory, args.pattern)
+                records = scan_directory(str(path), detector, args.pattern, ignore_patterns)
             else:
                 print(f"❌ Invalid path: {args.path}")
                 sys.exit(1)
             
-            print(f"\n📊 Scanned {len(records)} new code snippets")
+            print(f"\n📊 Registered {len(records)} new code snippets")
             
         elif args.command == "check":
-            result = memory.is_duplicate(args.code)
-            if result.is_duplicate:
-                print("⚠️  DUPLICATE detected!")
-                for record in result.matched_records:
-                    print(f"   Similar to: {record.file_path} (score: {result.similarity_score})")
+            # Unified check command: scan changed files and detect duplicates
+            path = Path(args.path)
+            
+            print(f"🔍 Checking {path} for updates and duplicates...")
+            
+            # Initialize ignore patterns
+            ignore_patterns = IgnorePatterns(
+                project_root=str(path if path.is_dir() else path.parent),
+                use_gitignore=not args.no_gitignore
+            )
+            
+            # Collect files to check
+            if path.is_file():
+                all_files = [str(path)] if not ignore_patterns.should_ignore(path) else []
             else:
-                print("✅ No duplicates found")
+                all_files = []
+                for file_path in path.rglob(args.pattern):
+                    if file_path.is_file() and not ignore_patterns.should_ignore(file_path):
+                        all_files.append(str(file_path))
+            
+            print(f"📁 Found {len(all_files)} Python files")
+            
+            # Check for deleted files
+            current_files_set = set(all_files)
+            deleted_files = detector.db_manager.check_and_mark_deleted_files(current_files_set)
+            if deleted_files:
+                print(f"🗑️  {len(deleted_files)} tracked files no longer exist (excluded from duplicate detection)")
+            
+            # Filter to only changed files unless forced
+            if args.force:
+                files_to_scan = all_files
+                print(f"🔄 Force mode: scanning all {len(files_to_scan)} files")
+            else:
+                changed_files = detector.db_manager.get_changed_files(all_files)
+                files_to_scan = changed_files
+                print(f"📝 {len(changed_files)} files have changed since last scan")
+            
+            # Scan changed files
+            new_records = []
+            updated_files = 0
+            duplicates_found = []
+            
+            # Show progress if there are many files
+            if len(files_to_scan) > 10:
+                print(f"⏳ Scanning {len(files_to_scan)} files...")
+            
+            for i, file_path in enumerate(files_to_scan):
+                # Show progress for large scans
+                if len(files_to_scan) > 50 and (i + 1) % 50 == 0:
+                    print(f"   Progress: {i + 1}/{len(files_to_scan)} files...")
+                
+                records = detector.register_file(file_path, force=args.force)
+                if records:
+                    new_records.extend(records)
+                    updated_files += 1
+                    
+                    # Check for duplicates in newly registered code
+                    for record in records:
+                        if record.metadata and record.metadata.get('type') == 'module':
+                            continue
+                        
+                        result = detector.find_similar(
+                            record.code_content, 
+                            record.function_name, 
+                            file_path
+                        )
+                        
+                        if result.is_duplicate and result.matched_records:
+                            # Collect duplicate info for summary
+                            dup_info = {
+                                'type': record.metadata.get('type', 'unknown') if record.metadata else 'unknown',
+                                'name': record.function_name,
+                                'file': file_path,
+                                'matches': []
+                            }
+                            
+                            for matched in result.matched_records[:3]:
+                                # Skip if it's the same record we just added
+                                if matched.code_hash == record.code_hash:
+                                    continue
+                                    
+                                dup_info['matches'].append({
+                                    'name': matched.function_name or 'N/A',
+                                    'file': matched.file_path or 'N/A',
+                                    'similarity': matched.similarity_score or 0
+                                })
+                            
+                            if dup_info['matches']:
+                                duplicates_found.append(dup_info)
+            
+            # Summary
+            print(f"\n📊 Summary:")
+            print(f"   Files scanned: {updated_files}")
+            print(f"   New/updated code units: {len(new_records)}")
+            
+            # Show duplicates if found
+            if duplicates_found:
+                print(f"\n⚠️  Found {len(duplicates_found)} duplicates:")
+                for dup in duplicates_found[:10]:  # Show first 10
+                    print(f"\n   {dup['type']}: '{dup['name']}' in {dup['file']}")
+                    for match in dup['matches'][:2]:  # Show first 2 matches
+                        print(f"      Similar to: {match['name']} in {match['file']} (similarity: {match['similarity']:.3f})")
+                
+                if len(duplicates_found) > 10:
+                    print(f"\n   ... and {len(duplicates_found) - 10} more duplicates")
+            
+            if not args.show_all:
+                print(f"\n💡 Use --show-all to see all existing duplicates")
+            else:
+                # Show all duplicates in the project
+                print(f"\n🔍 Checking all duplicates in project...")
+                duplicates = detector.find_potential_duplicates(threshold=0.8)
+                
+                if duplicates:
+                    print(f"\n⚠️  Found {len(duplicates)} duplicate pairs:")
+                    for i, (record1, record2, similarity) in enumerate(duplicates[:20], 1):
+                        type1 = record1.metadata.get('type', 'unknown') if record1.metadata else 'unknown'
+                        type2 = record2.metadata.get('type', 'unknown') if record2.metadata else 'unknown'
+                        
+                        print(f"\n{i:2d}. Similarity: {similarity:.3f}")
+                        print(f"    {type1}: {record1.function_name or 'N/A'} in {record1.file_path or 'N/A'}")
+                        print(f"    {type2}: {record2.function_name or 'N/A'} in {record2.file_path or 'N/A'}")
+                    
+                    if len(duplicates) > 20:
+                        print(f"\n... and {len(duplicates) - 20} more pairs")
+                else:
+                    print(f"\n✅ No duplicates found!")
                 
         elif args.command == "register":
-            record = memory.register(
+            records = detector.register_code(
                 args.code,
                 function_name=args.function_name,
                 file_path=args.file_path
             )
-            print(f"✅ Registered code with hash: {record.code_hash}")
+            if records:
+                print(f"✅ Registered {len(records)} code units")
+                for record in records:
+                    unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
+                    print(f"   {unit_type}: {record.function_name or 'N/A'} (hash: {record.code_hash[:16]}...)")
+            else:
+                print("⚠️  No code units found to register")
             
         elif args.command == "list":
-            records = memory.get_all_records()
+            records = detector.get_all_records()
+            
+            # Sort records
+            if args.sort_by == "timestamp":
+                records.sort(key=lambda r: r.timestamp, reverse=True)
+            elif args.sort_by == "function":
+                records.sort(key=lambda r: r.function_name or "")
+            elif args.sort_by == "file":
+                records.sort(key=lambda r: r.file_path or "")
+            elif args.sort_by == "hash":
+                records.sort(key=lambda r: r.code_hash)
+            
+            # Apply limit
+            if args.limit:
+                records = records[:args.limit]
             
             if args.format == "json":
                 output = [record.to_dict() for record in records]
                 print(json.dumps(output, indent=2, default=str))
-            else:
-                print(f"\n📋 Found {len(records)} code records:")
-                for record in records:
-                    print(f"   Hash: {record.code_hash[:16]}...")
-                    print(f"   Function: {record.function_name or 'N/A'}")
-                    print(f"   File: {record.file_path or 'N/A'}")
-                    print(f"   Timestamp: {record.timestamp}")
-                    print("   " + "-" * 40)
+            elif args.format == "detailed":
+                print(f"\n📊 Code Records Summary:")
+                print(f"   Total records: {len(detector.get_all_records())}")
+                if args.limit:
+                    print(f"   Showing: {len(records)} records")
+                print(f"   Sorted by: {args.sort_by}")
+                print("\n" + "=" * 80)
+                
+                for i, record in enumerate(records, 1):
+                    print(f"\n📝 Record #{i}")
+                    print(f"   🔍 Hash: {record.code_hash}")
+                    print(f"   🏷️  Function: {record.function_name or 'N/A'}")
+                    print(f"   📁 File: {record.file_path or 'N/A'}")
+                    print(f"   ⏰ Timestamp: {record.timestamp}")
+                    if record.metadata:
+                        print(f"   📋 Metadata: {record.metadata}")
+                    
+                    if args.show_code:
+                        print(f"   💻 Code:")
+                        code_lines = record.code_content.strip().split('\n')
+                        for j, line in enumerate(code_lines[:10], 1):  # Show first 10 lines
+                            print(f"      {j:2d}| {line}")
+                        if len(code_lines) > 10:
+                            print(f"         ... ({len(code_lines) - 10} more lines)")
+                    
+                    print("   " + "-" * 70)
+            else:  # table format
+                print(f"\n📋 Found {len(records)} code records (sorted by {args.sort_by}):")
+                all_records = detector.get_all_records()
+                if len(all_records) != len(records) and args.limit:
+                    print(f"   (Showing {len(records)} of {len(all_records)} total records)")
+                print()
+                
+                # Table header
+                print(f"{'#':>3} {'Function':20} {'File':25} {'Hash':16} {'Timestamp':19}")
+                print("-" * 85)
+                
+                for i, record in enumerate(records, 1):
+                    func_name = (record.function_name or 'N/A')[:19]
+                    file_name = (record.file_path or 'N/A')[:24]
+                    hash_short = record.code_hash[:16]
+                    timestamp = str(record.timestamp)[:19]
+                    
+                    print(f"{i:3d} {func_name:20} {file_name:25} {hash_short:16} {timestamp:19}")
+                    
+                    if args.show_code:
+                        preview = record.code_content.strip()[:60].replace('\n', '\\n')
+                        print(f"    Code preview: {preview}...")
+                        
+                        # Show unit type for AST mode
+                        if record.metadata and 'type' in record.metadata:
+                            unit_type = record.metadata['type']
+                            complexity = record.metadata.get('complexity', 0)
+                            print(f"    Type: {unit_type}, Complexity: {complexity}")
+                        
+                        print()
                     
         elif args.command == "clear":
             if not args.yes:
@@ -202,8 +632,220 @@ def main():
                     print("Operation cancelled")
                     sys.exit(0)
             
-            memory.clear_memory()
+            detector.clear_memory()
             print("✅ Memory cleared successfully")
+            
+        elif args.command == "analyze":
+            analysis = detector.analyze_code_structure(args.code, args.file_path)
+            
+            print(f"\n📊 Code Structure Analysis:")
+            print(f"   Total units: {analysis['total_units']}")
+            print(f"   Functions: {len(analysis['functions'])}")
+            print(f"   Classes: {len(analysis['classes'])}")
+            print(f"   Total complexity: {analysis['total_complexity']}")
+            print(f"   Average complexity: {analysis['average_complexity']:.2f}")
+            print(f"   Dependencies: {', '.join(analysis['dependencies']) if analysis['dependencies'] else 'None'}")
+            
+            if analysis['functions']:
+                print(f"\n🔄 Functions:")
+                for func in analysis['functions']:
+                    print(f"   • {func.name} (lines {func.start_line}-{func.end_line}, complexity: {func.complexity_score})")
+            
+            if analysis['classes']:
+                print(f"\n🏷️ Classes:")
+                for cls in analysis['classes']:
+                    print(f"   • {cls.name} (lines {cls.start_line}-{cls.end_line}, complexity: {cls.complexity_score})")
+            
+        elif args.command == "duplicates":
+            duplicates = detector.find_potential_duplicates(args.similarity_threshold)
+            
+            if not duplicates:
+                print(f"✅ No potential duplicates found with threshold {args.threshold}")
+            else:
+                print(f"\n🔍 Found {len(duplicates)} potential duplicate pairs (threshold: {args.threshold}):")
+                
+                for i, (record1, record2, similarity) in enumerate(duplicates[:args.limit], 1):
+                    type1 = record1.metadata.get('type', 'unknown') if record1.metadata else 'unknown'
+                    type2 = record2.metadata.get('type', 'unknown') if record2.metadata else 'unknown'
+                    
+                    print(f"\n{i:2d}. Similarity: {similarity:.3f}")
+                    print(f"    {type1}: {record1.function_name or 'N/A'} in {record1.file_path or 'N/A'}")
+                    print(f"    {type2}: {record2.function_name or 'N/A'} in {record2.file_path or 'N/A'}")
+                
+                if len(duplicates) > args.limit:
+                    print(f"\n... and {len(duplicates) - args.limit} more pairs")
+                    
+            # Show statistics
+            stats = detector.get_statistics()
+            print(f"\n📊 Statistics:")
+            print(f"   Total units: {stats['total_units']}")
+            print(f"   Functions: {stats['functions']}")
+            print(f"   Classes: {stats['classes']}")
+            print(f"   Modules: {stats['modules']}")
+            
+        elif args.command == "relations":
+            # Use auto mode by default unless manual is specified
+            use_auto = not args.manual
+            
+            if use_auto:
+                # Adaptive threshold search mode
+                print(f"🔍 Auto-finding optimal threshold (target: {args.target} connections, max: {args.max_connections})...")
+                
+                results = detector.find_relations_adaptive(
+                    target_connections=args.target,
+                    max_connections=args.max_connections
+                )
+                
+                # Display results
+                print(f"\n🎯 Adaptive Search Results:")
+                print(f"   Final threshold: {results['threshold']:.2f}")
+                print(f"   Final connections: {results['connections']}")
+                print(f"   Stop reason: {results['stop_reason']}")
+                print(f"   Iterations: {len(results['iterations'])}")
+                
+                # Show iteration history
+                if len(results['iterations']) > 1:
+                    print(f"\n📊 Search History:")
+                    for i, iteration in enumerate(results['iterations'][-5:], max(1, len(results['iterations'])-4)):
+                        print(f"   {i:2d}. threshold={iteration['threshold']:.2f} → {iteration['estimated_connections']} connections ({iteration['time']:.2f}s)")
+                
+                # Display the final graph
+                graph = results['final_graph']
+                total_nodes = len(graph)
+                connected_nodes = sum(1 for connections in graph.values() if connections)
+                
+                print(f"\n🕸️  Final Similarity Graph:")
+                print(f"   Total nodes: {total_nodes}")
+                print(f"   Connected nodes: {connected_nodes}")
+                print(f"   Total connections: {results['connections']}")
+                
+                if connected_nodes > 0:
+                    avg_connections = results['connections'] * 2 / total_nodes
+                    print(f"   Average connections per node: {avg_connections:.2f}")
+                    
+                    # Show top connected nodes
+                    print(f"\n🔗 Top connected nodes (showing {min(10, connected_nodes)}):")
+                    
+                    node_connections = [(hash_code, len(connections)) for hash_code, connections in graph.items() if connections]
+                    node_connections.sort(key=lambda x: x[1], reverse=True)
+                    
+                    for i, (hash_code, conn_count) in enumerate(node_connections[:10], 1):
+                        record = detector.records.get(hash_code)
+                        if record:
+                            func_name = record.function_name or 'N/A'
+                            file_path = record.file_path or 'N/A'
+                            print(f"   {i:2d}. {func_name} ({file_path}) - {conn_count} connections")
+                            
+                else:
+                    print(f"   No connections found")
+                
+            else:
+                # Determine computation mode
+                use_fast_mode = not args.full
+                mode_name = "FAST" if use_fast_mode else "FULL"
+                
+                if args.graph:
+                    # Show overall graph structure
+                    print(f"🔄 Building similarity graph ({mode_name} mode)...")
+                    graph = detector.build_similarity_graph(args.threshold, use_fast_mode)
+                    
+                    print(f"\n🕸️  Similarity Graph (threshold: {args.threshold}):")
+                    
+                    # Calculate graph statistics
+                    total_nodes = len(graph)
+                    connected_nodes = sum(1 for connections in graph.values() if connections)
+                    total_connections = sum(len(connections) for connections in graph.values()) // 2
+                    avg_connections = total_connections * 2 / total_nodes if total_nodes > 0 else 0
+                    
+                    print(f"   Total nodes: {total_nodes}")
+                    print(f"   Connected nodes: {connected_nodes}")
+                    print(f"   Total connections: {total_connections}")
+                    print(f"   Average connections per node: {avg_connections:.2f}")
+                    
+                    # Provide guidance based on results
+                    if total_connections > 100000:
+                        print(f"\n💡 Too many connections! Try higher threshold:")
+                        print(f"   --threshold 0.7  (for similar functions)")
+                        print(f"   --threshold 0.8  (for near-duplicates)")
+                    elif total_connections < 10:
+                        print(f"\n💡 Very few connections. Try lower threshold:")
+                        print(f"   --threshold 0.2  (for loose similarities)")
+                        print(f"   --threshold 0.1  (for any structural resemblance)")
+                    else:
+                        print(f"\n✅ Good threshold level for analysis")
+                    
+                    if args.limit and connected_nodes > 0:
+                        print(f"\n🔗 Top connected nodes (showing {min(args.limit, connected_nodes)}):")
+                        
+                        # Sort nodes by number of connections
+                        node_connections = [(hash_code, len(connections)) for hash_code, connections in graph.items() if connections]
+                        node_connections.sort(key=lambda x: x[1], reverse=True)
+                        
+                        for i, (hash_code, conn_count) in enumerate(node_connections[:args.limit], 1):
+                            record = detector.records.get(hash_code)
+                            if record:
+                                func_name = record.function_name or 'N/A'
+                                file_path = record.file_path or 'N/A'
+                                print(f"   {i:2d}. {func_name} ({file_path}) - {conn_count} connections")
+                
+                elif args.hash:
+                    # Show relations for specific code unit
+                    related = detector.get_related_units(args.hash, args.threshold, args.limit)
+                    
+                    if not related:
+                        print(f"❌ No related units found for hash {args.hash[:16]}... (threshold: {args.threshold})")
+                    else:
+                        target_record = detector.records.get(args.hash)
+                        if target_record:
+                            print(f"\n🔗 Related to: {target_record.function_name or 'N/A'} in {target_record.file_path or 'N/A'}")
+                        else:
+                            print(f"\n🔗 Related to hash: {args.hash[:16]}...")
+                        
+                        print(f"   Found {len(related)} related units (threshold: {args.threshold}):\n")
+                        
+                        for i, (record, similarity) in enumerate(related, 1):
+                            unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
+                            func_name = record.function_name or 'N/A'
+                            file_path = record.file_path or 'N/A'
+                            print(f"   {i:2d}. {unit_type}: {func_name} in {file_path}")
+                            print(f"       Similarity: {similarity:.3f}")
+                            print(f"       Hash: {record.code_hash[:16]}...")
+                            print()
+                
+                else:
+                    # Interactive mode - show top connected units and let user pick
+                    print(f"🔄 Building similarity graph ({mode_name} mode)...")
+                    graph = detector.build_similarity_graph(args.threshold, use_fast_mode)
+                    
+                    if not any(connections for connections in graph.values()):
+                        print(f"❌ No connections found with threshold {args.threshold}")
+                        print("   Try lowering the threshold with --threshold 0.2")
+                    else:
+                        print(f"\n🕸️  Similarity Graph Overview (threshold: {args.threshold}):")
+                        
+                        # Show top connected units
+                        node_connections = [(hash_code, len(connections)) for hash_code, connections in graph.items() if connections]
+                        node_connections.sort(key=lambda x: x[1], reverse=True)
+                        
+                        print(f"   Top {min(10, len(node_connections))} most connected units:\n")
+                        
+                        for i, (hash_code, conn_count) in enumerate(node_connections[:10], 1):
+                            record = detector.records.get(hash_code)
+                            if record:
+                                unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
+                                func_name = record.function_name or 'N/A'
+                                file_path = record.file_path or 'N/A'
+                                print(f"   {i:2d}. {unit_type}: {func_name} ({file_path})")
+                                print(f"       {conn_count} connections | Hash: {record.code_hash[:16]}...")
+                                print()
+                        
+                        print(f"💡 Use --hash <code_hash> to see specific relations")
+                        print(f"💡 Use --graph to see full graph statistics")
+                        print(f"💡 Try different thresholds:")
+                        print(f"   0.8+ = Near duplicates")
+                        print(f"   0.6+ = Similar functions") 
+                        print(f"   0.4+ = Related patterns")
+                        print(f"   0.2+ = Loose similarities")
             
         else:
             parser.print_help()

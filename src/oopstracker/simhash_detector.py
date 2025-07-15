@@ -112,6 +112,54 @@ class BKTree:
         """Calculate Hamming distance between two hash values."""
         return bin(hash1 ^ hash2).count('1')
     
+    def find_all_pairs(self, max_distance: int) -> List[Tuple]:
+        """
+        Find all pairs of records within max_distance.
+        Much more efficient than O(n²) comparison.
+        
+        Args:
+            max_distance: Maximum Hamming distance for pairs
+            
+        Returns:
+            List of (record1, record2, distance) tuples
+        """
+        if self.root is None:
+            return []
+        
+        pairs = []
+        all_nodes = []
+        self._collect_all_nodes(self.root, all_nodes)
+        
+        # For each node, find similar nodes using BK-tree search
+        processed = set()
+        
+        for node in all_nodes:
+            if id(node) in processed:
+                continue
+            
+            # Search for similar nodes
+            similar = self.search(node.simhash, max_distance)
+            
+            for similar_record, distance in similar:
+                # Avoid duplicate pairs and self-comparison
+                if (id(node.record) != id(similar_record) and 
+                    (id(node.record), id(similar_record)) not in processed and
+                    (id(similar_record), id(node.record)) not in processed):
+                    
+                    pairs.append((node.record, similar_record, distance))
+                    processed.add((id(node.record), id(similar_record)))
+        
+        return pairs
+    
+    def _collect_all_nodes(self, node: 'BKTreeNode', nodes: List):
+        """Collect all nodes in the tree."""
+        if node is None:
+            return
+        
+        nodes.append(node)
+        for child in node.children.values():
+            self._collect_all_nodes(child, nodes)
+    
     def get_stats(self) -> Dict[str, int]:
         """Get statistics about the BK-tree."""
         if self.root is None:

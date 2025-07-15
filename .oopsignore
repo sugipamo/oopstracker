@@ -1,0 +1,20 @@
+# OOPStracker ignore patterns
+# This file uses .gitignore syntax
+# Lines starting with # are comments
+# Lines starting with ! are whitelist patterns
+
+# Example project-specific patterns
+examples/
+docs/
+*.md
+tests/fixtures/
+performance_test.py
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+
+# Large test files
+test_data/
+sample_data/
