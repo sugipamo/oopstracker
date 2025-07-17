@@ -11,6 +11,7 @@ from .ast_analyzer import ASTAnalyzer, CodeUnit
 from .models import CodeRecord, SimilarityResult
 from .simhash_detector import BKTree
 from .ast_database import ASTDatabaseManager
+from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ class ASTSimHashDetector:
         
         # Initialize database
         self.db_manager = ASTDatabaseManager(db_path)
+        
+        # Initialize trivial pattern filter
+        self.trivial_filter = TrivialPatternFilter(TrivialFilterConfig())
         
         # Cache for duplicate detection results
         self._duplicates_cache: Dict[str, List[Tuple[CodeRecord, CodeRecord, float]]] = {}
@@ -468,7 +472,12 @@ class ASTSimHashDetector:
             meaningful_records = records
             logger.info(f"Including all {len(records)} records (trivial duplicates enabled)")
         else:
-            meaningful_records = [r for r in records if self._is_meaningful_for_refactoring(r)]
+            # Use new trivial filter instead of old _is_meaningful_for_refactoring
+            meaningful_records = []
+            for record in records:
+                if not self.trivial_filter.should_exclude_code_record(record):
+                    if self._is_meaningful_for_refactoring(record):
+                        meaningful_records.append(record)
             logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
         
         total_records = len(meaningful_records)
@@ -528,7 +537,12 @@ class ASTSimHashDetector:
             meaningful_records = records
             logger.info(f"Including all {len(records)} records (trivial duplicates enabled)")
         else:
-            meaningful_records = [r for r in records if self._is_meaningful_for_refactoring(r)]
+            # Use new trivial filter instead of old _is_meaningful_for_refactoring
+            meaningful_records = []
+            for record in records:
+                if not self.trivial_filter.should_exclude_code_record(record):
+                    if self._is_meaningful_for_refactoring(record):
+                        meaningful_records.append(record)
             logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
         
         for i, record1 in enumerate(meaningful_records):
@@ -566,6 +580,10 @@ class ASTSimHashDetector:
         - Trivial __init__ methods
         - Getters/setters
         - Boilerplate code
+        - Enum classes
+        - Dataclasses and Pydantic models
+        - Abstract methods and Protocol classes
+        - Test fixtures
         """
         if not record.code_content:
             return False
@@ -581,6 +599,64 @@ class ASTSimHashDetector:
         unit = self.code_units.get(record.code_hash)
         if not unit:
             return False
+        
+        # Filter out Enum classes
+        if unit.type == 'class':
+            # Check for Enum inheritance
+            if any('(Enum)' in line or '(IntEnum)' in line or '(Flag)' in line or '(IntFlag)' in line 
+                   for line in lines[:5]):  # Check first 5 lines for class definition
+                return False
+            
+            # Check if class body is mostly constant assignments (typical for Enum)
+            constant_lines = [line for line in lines if line and '=' in line and line.split('=')[0].strip().isupper()]
+            if len(constant_lines) >= len(lines) * 0.7:  # 70% or more constant assignments
+                return False
+        
+        # Filter out dataclasses and Pydantic models
+        if unit.type == 'class':
+            # Check for dataclass decorator
+            if any('@dataclass' in line for line in lines[:5]):
+                return False
+            
+            # Check for Pydantic BaseModel inheritance
+            if any('(BaseModel)' in line or '(BaseSettings)' in line for line in lines[:5]):
+                return False
+            
+            # Check for TypedDict
+            if any('(TypedDict)' in line for line in lines[:5]):
+                return False
+            
+            # Check for NamedTuple
+            if any('(NamedTuple)' in line or '= NamedTuple(' in line for line in lines):
+                return False
+        
+        # Filter out Protocol classes
+        if unit.type == 'class':
+            if any('(Protocol)' in line for line in lines[:5]):
+                return False
+        
+        # Filter out abstract methods
+        if unit.type == 'function':
+            # Check for abstractmethod decorator
+            if any('@abstractmethod' in line or '@abc.abstractmethod' in line for line in lines):
+                return False
+            
+            # Check for abstract property decorators
+            if any('@abstractproperty' in line or '@abc.abstractproperty' in line for line in lines):
+                return False
+        
+        # Filter out test fixtures and test helper functions
+        if unit.type == 'function':
+            # Common test fixture names
+            test_fixture_names = ['setUp', 'tearDown', 'setUpClass', 'tearDownClass', 
+                                'setUpModule', 'tearDownModule', 'setup_method', 'teardown_method',
+                                'setup_class', 'teardown_class', 'setup_module', 'teardown_module']
+            if record.function_name in test_fixture_names:
+                return False
+            
+            # pytest fixtures
+            if any('@pytest.fixture' in line or '@fixture' in line for line in lines):
+                return False
         
         # Filter out simple pass classes and data classes
         if unit.type == 'class':

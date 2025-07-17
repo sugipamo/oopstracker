@@ -370,16 +370,23 @@ class ASTAnalyzer:
         extractor = ASTStructureExtractor()
         extractor.visit(node)
         
-        # Extract class source code
+        # Extract class source code including decorators
         lines = source_code.splitlines()
-        class_lines = lines[node.lineno - 1:node.end_lineno]
+        
+        # Determine the actual start line (including decorators)
+        start_line = node.lineno
+        if hasattr(node, 'decorator_list') and node.decorator_list:
+            # Use the line number of the first decorator
+            start_line = node.decorator_list[0].lineno
+        
+        class_lines = lines[start_line - 1:node.end_lineno]
         class_source = '\n'.join(class_lines)
         
         return CodeUnit(
             name=node.name,
             type="class",
             source_code=class_source,
-            start_line=node.lineno,
+            start_line=start_line,
             end_line=node.end_lineno or node.lineno,
             file_path=file_path,
             ast_structure=extractor.get_structure_signature(),

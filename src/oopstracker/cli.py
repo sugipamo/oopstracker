@@ -13,6 +13,7 @@ from .models import CodeRecord
 from .exceptions import OOPSTrackerError
 from .ignore_patterns import IgnorePatterns
 from .ast_simhash_detector import ASTSimHashDetector
+from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
 
 
 def setup_logging(level: str = "INFO"):
@@ -54,13 +55,8 @@ def setup_logging(level: str = "INFO"):
         logging.getLogger('oopstracker.ignore_patterns').setLevel(logging.WARNING)
 
 
-def format_file_size(size_bytes: int) -> str:
-    """Format file size in human readable format."""
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if size_bytes < 1024.0:
-            return f"{size_bytes:.1f}{unit}"
-        size_bytes /= 1024.0
-    return f"{size_bytes:.1f}TB"
+# format_file_size関数は util/format_utils.py に移動されました
+# 新しいimport文を追加してください: from util.format_utils import format_file_size
 
 
 
