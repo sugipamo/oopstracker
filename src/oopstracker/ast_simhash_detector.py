@@ -38,6 +38,10 @@ class ASTSimHashDetector:
         # Initialize database
         self.db_manager = ASTDatabaseManager(db_path)
         
+        # Cache for duplicate detection results
+        self._duplicates_cache: Dict[str, List[Tuple[CodeRecord, CodeRecord, float]]] = {}
+        self._cache_timestamp = 0
+        
         # Load existing data
         self._load_existing_data()
         
@@ -293,6 +297,11 @@ class ASTSimHashDetector:
         for record in similar_records:
             stored_unit = self.code_units.get(record.code_hash)
             if stored_unit:
+                # Skip self-comparison
+                if (stored_unit.file_path == target_unit.file_path and 
+                    stored_unit.start_line == target_unit.start_line):
+                    continue
+                    
                 structural_sim = self.analyzer.calculate_structural_similarity(
                     target_unit, stored_unit
                 )
@@ -404,35 +413,137 @@ class ASTSimHashDetector:
         """
         return list(self.records.values())
     
-    def find_potential_duplicates(self, threshold: float = 0.8) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+    def find_potential_duplicates(self, threshold: float = 0.8, use_fast_mode: bool = True, use_cache: bool = True, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
         """
         Find potential duplicate pairs across all registered code.
         
         Args:
             threshold: Minimum similarity threshold
+            use_fast_mode: Use SimHash for pre-filtering (much faster)
+            use_cache: Use cached results if available
+            include_trivial: Include trivial duplicates (pass classes, simple getters, etc.)
             
         Returns:
             List of (record1, record2, similarity_score) tuples
         """
-        logger.info(f"Searching for potential duplicates with threshold {threshold}")
+        logger.info(f"Searching for potential duplicates with threshold {threshold} (fast_mode: {use_fast_mode}, cache: {use_cache}, include_trivial: {include_trivial})")
         
-        duplicates = []
+        # Check cache
+        cache_key = f"{threshold}_{use_fast_mode}_{include_trivial}_{len(self.records)}"
+        current_timestamp = max((r.timestamp for r in self.records.values()), default=0)
+        
+        if use_cache and cache_key in self._duplicates_cache and current_timestamp <= self._cache_timestamp:
+            logger.info("Using cached duplicate detection results")
+            return self._duplicates_cache[cache_key]
+        
+        # Compute duplicates
         records = list(self.records.values())
         
-        for i, record1 in enumerate(records):
+        if use_fast_mode:
+            duplicates = self._find_duplicates_fast(records, threshold, include_trivial)
+        else:
+            duplicates = self._find_duplicates_exhaustive(records, threshold, include_trivial)
+        
+        # Update cache
+        if use_cache:
+            self._duplicates_cache[cache_key] = duplicates
+            self._cache_timestamp = current_timestamp
+            logger.info(f"Cached {len(duplicates)} duplicate pairs")
+        
+        return duplicates
+    
+    def _find_duplicates_fast(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+        """Fast duplicate detection using SimHash pre-filtering."""
+        duplicates = []
+        processed_pairs = set()
+        
+        # Calculate appropriate hamming threshold for SimHash pre-filtering
+        # Higher similarity threshold -> lower hamming distance needed
+        hamming_threshold = max(1, int(self.hamming_threshold * (1.0 - threshold)))
+        
+        logger.info(f"Using SimHash hamming threshold: {hamming_threshold}")
+        
+        # Filter records for meaningful duplicates if requested
+        if include_trivial:
+            meaningful_records = records
+            logger.info(f"Including all {len(records)} records (trivial duplicates enabled)")
+        else:
+            meaningful_records = [r for r in records if self._is_meaningful_for_refactoring(r)]
+            logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
+        
+        total_records = len(meaningful_records)
+        processed_count = 0
+        
+        for i, record1 in enumerate(meaningful_records):
+            # Show progress for large datasets
+            if total_records > 100 and (i + 1) % 50 == 0:
+                progress = (i + 1) / total_records * 100
+                print(f"   Processing: {i + 1}/{total_records} records ({progress:.1f}%)")
+            
             unit1 = self.code_units.get(record1.code_hash)
-            if not unit1:
+            if not unit1 or record1.simhash is None:
                 continue
             
-            for j, record2 in enumerate(records[i+1:], i+1):
+            # Use BK-tree to find similar records by SimHash
+            similar_tuples = self.bk_tree.search(record1.simhash, hamming_threshold)
+            similar_records = [record for record, distance in similar_tuples]
+            
+            for record2 in similar_records:
+                # Skip self
+                if record1.code_hash == record2.code_hash:
+                    continue
+                
+                # Avoid duplicate pairs
+                pair_key = tuple(sorted([record1.code_hash, record2.code_hash]))
+                if pair_key in processed_pairs:
+                    continue
+                processed_pairs.add(pair_key)
+                
                 unit2 = self.code_units.get(record2.code_hash)
                 if not unit2:
                     continue
                 
-                # Skip if same file and same type
+                # Skip if same file and same function
                 if (unit1.file_path == unit2.file_path and 
-                    unit1.type == unit2.type and 
-                    unit1.name == unit2.name):
+                    unit1.start_line == unit2.start_line):
+                    continue
+                
+                # Calculate actual structural similarity
+                similarity = self.analyzer.calculate_structural_similarity(unit1, unit2)
+                
+                if similarity >= threshold:
+                    duplicates.append((record1, record2, similarity))
+        
+        # Sort by similarity descending
+        duplicates.sort(key=lambda x: x[2], reverse=True)
+        logger.info(f"Found {len(duplicates)} potential duplicates with fast mode")
+        return duplicates
+    
+    def _find_duplicates_exhaustive(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+        """Exhaustive O(n²) duplicate detection for maximum accuracy."""
+        duplicates = []
+        
+        # Filter records for meaningful duplicates if requested
+        if include_trivial:
+            meaningful_records = records
+            logger.info(f"Including all {len(records)} records (trivial duplicates enabled)")
+        else:
+            meaningful_records = [r for r in records if self._is_meaningful_for_refactoring(r)]
+            logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
+        
+        for i, record1 in enumerate(meaningful_records):
+            unit1 = self.code_units.get(record1.code_hash)
+            if not unit1:
+                continue
+            
+            for j, record2 in enumerate(meaningful_records[i+1:], i+1):
+                unit2 = self.code_units.get(record2.code_hash)
+                if not unit2:
+                    continue
+                
+                # Skip if same file and same function
+                if (unit1.file_path == unit2.file_path and 
+                    unit1.start_line == unit2.start_line):
                     continue
                 
                 similarity = self.analyzer.calculate_structural_similarity(unit1, unit2)
@@ -440,11 +551,92 @@ class ASTSimHashDetector:
                 if similarity >= threshold:
                     duplicates.append((record1, record2, similarity))
         
-        # Sort by similarity score
+        # Sort by similarity descending
         duplicates.sort(key=lambda x: x[2], reverse=True)
-        
-        logger.info(f"Found {len(duplicates)} potential duplicate pairs")
+        logger.info(f"Found {len(duplicates)} potential duplicates with exhaustive mode")
         return duplicates
+    
+    def _is_meaningful_for_refactoring(self, record: CodeRecord) -> bool:
+        """
+        Check if a code record represents meaningful code worth refactoring.
+        
+        Filters out:
+        - Very short code (< 3 lines or < 50 characters)
+        - Simple pass classes
+        - Trivial __init__ methods
+        - Getters/setters
+        - Boilerplate code
+        """
+        if not record.code_content:
+            return False
+        
+        code = record.code_content.strip()
+        lines = [line.strip() for line in code.split('\n') if line.strip()]
+        
+        # Filter by minimum size - more strict for short code
+        if len(lines) < 4 or len(code) < 80:
+            return False
+        
+        # Get unit information
+        unit = self.code_units.get(record.code_hash)
+        if not unit:
+            return False
+        
+        # Filter out simple pass classes and data classes
+        if unit.type == 'class':
+            non_comment_lines = [line for line in lines if not line.startswith('#') and not line.startswith('"""') and not line.startswith("'''")]
+            if len(non_comment_lines) <= 2 and 'pass' in code:
+                return False
+            
+            # Filter out simple data classes (mostly field definitions)
+            field_lines = [line for line in lines if ':' in line and ('=' in line or 'Field(' in line)]
+            if len(field_lines) >= len(lines) - 2:  # Mostly just field definitions
+                return False
+        
+        # Filter out trivial __init__ methods
+        if record.function_name == '__init__' and unit.type == 'function':
+            # Check if it's just simple assignment
+            assignment_lines = [line for line in lines if 'self.' in line and '=' in line]
+            if len(assignment_lines) >= len(lines) - 2:  # Mostly just assignments
+                return False
+        
+        # Filter out simple getters/setters
+        if unit.type == 'function':
+            if (record.function_name.startswith('get_') or record.function_name.startswith('set_')) and len(lines) <= 3:
+                return False
+        
+        # Filter out boilerplate patterns
+        boilerplate_patterns = [
+            'raise NotImplementedError',
+            'return NotImplemented',
+            'pass',
+            'return None'
+        ]
+        
+        if any(pattern in code for pattern in boilerplate_patterns) and len(lines) <= 3:
+            return False
+        
+        # Check for actual logic complexity
+        complexity_indicators = [
+            'if ', 'elif ', 'else:',
+            'for ', 'while ',
+            'try:', 'except:', 'finally:',
+            'with ', 'async ', 'await ',
+            'lambda ', 'yield ',
+            'and ', 'or ', 'not ',
+            '>', '<', '>=', '<=', '==', '!=',
+            '+', '-', '*', '/', '%', '//',
+            'len(', 'str(', 'int(', 'float(',
+            'print(', 'return ', 'raise '
+        ]
+        
+        complexity_score = sum(1 for indicator in complexity_indicators if indicator in code)
+        
+        # Require minimum complexity for meaningful refactoring
+        if complexity_score < 3:
+            return False
+        
+        return True
     
     def build_similarity_graph(self, threshold: float = 0.3, use_fast_mode: bool = True) -> Dict[str, List[Tuple[str, float]]]:
         """

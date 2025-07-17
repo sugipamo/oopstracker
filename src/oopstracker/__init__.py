@@ -16,6 +16,7 @@ from .models import CodeRecord, SimilarityResult
 from .exceptions import OOPSTrackerError, DatabaseError, ValidationError
 from .simhash_detector import SimHashSimilarityDetector, BKTree
 from .hybrid_detector import HybridCodeMemory, HybridResult, create_hybrid_memory
+from .refactoring_analyzer import RefactoringAnalyzer, RefactoringRecommendation, RefactoringType
 
 __all__ = [
     "CodeMemory",
@@ -29,4 +30,7 @@ __all__ = [
     "HybridCodeMemory",
     "HybridResult",
     "create_hybrid_memory",
+    "RefactoringAnalyzer",
+    "RefactoringRecommendation",
+    "RefactoringType",
 ]

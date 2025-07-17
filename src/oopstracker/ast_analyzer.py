@@ -9,6 +9,7 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
+from collections import Counter
 
 
 logger = logging.getLogger(__name__)
@@ -53,16 +54,36 @@ class ASTStructureExtractor(ast.NodeVisitor):
         self.structure_tokens.append(f"FUNC:{len(node.args.args)}")
         self.structure_tokens.append(f"DECORATOR:{len(node.decorator_list)}")
         
-        # Add argument types if available
-        for arg in node.args.args:
+        # Add detailed argument information
+        for i, arg in enumerate(node.args.args):
             if arg.annotation:
-                self.structure_tokens.append(f"ARG_TYPE:{ast.dump(arg.annotation)}")
+                ann_type = self._get_type_name(arg.annotation)
+                self.structure_tokens.append(f"ARG_TYPE:{i}:{ann_type}")
+            self.structure_tokens.append(f"ARG:{i}:{arg.arg}")
         
         # Add return type if available
         if node.returns:
-            self.structure_tokens.append(f"RETURN_TYPE:{ast.dump(node.returns)}")
+            ret_type = self._get_type_name(node.returns)
+            self.structure_tokens.append(f"RETURN_TYPE:{ret_type}")
         
         self.generic_visit(node)
+    
+    def _get_type_name(self, annotation):
+        """Extract type name from annotation node."""
+        if isinstance(annotation, ast.Name):
+            return annotation.id
+        elif isinstance(annotation, ast.Constant):
+            return str(annotation.value)
+        elif isinstance(annotation, ast.Subscript):
+            # Handle List[str], Dict[str, int], etc.
+            base = self._get_type_name(annotation.value)
+            if hasattr(annotation.slice, 'elts'):
+                args = [self._get_type_name(elt) for elt in annotation.slice.elts]
+                return f"{base}[{','.join(args)}]"
+            else:
+                arg = self._get_type_name(annotation.slice)
+                return f"{base}[{arg}]"
+        return ast.dump(annotation)
     
     def visit_ClassDef(self, node):
         """Visit class definitions."""
@@ -178,6 +199,36 @@ class ASTStructureExtractor(ast.NodeVisitor):
         op_name = node.op.__class__.__name__
         self.structure_tokens.append(f"BOOL:{op_name}")
         self.generic_visit(node)
+    
+    def visit_Assign(self, node):
+        """Visit assignment statements."""
+        # Track assignment patterns
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                # Track variable assignment with type hint if available
+                value_type = self._infer_value_type(node.value)
+                self.structure_tokens.append(f"ASSIGN:{target.id}:{value_type}")
+            elif isinstance(target, ast.Tuple) or isinstance(target, ast.List):
+                # Track unpacking assignments
+                self.structure_tokens.append(f"UNPACK:{len(target.elts)}")
+        self.generic_visit(node)
+    
+    def _infer_value_type(self, value_node):
+        """Infer type from value node."""
+        if isinstance(value_node, ast.Constant):
+            return type(value_node.value).__name__
+        elif isinstance(value_node, ast.Name):
+            return f"var:{value_node.id}"
+        elif isinstance(value_node, ast.Call):
+            if isinstance(value_node.func, ast.Name):
+                return f"call:{value_node.func.id}"
+        elif isinstance(value_node, ast.List):
+            return "list"
+        elif isinstance(value_node, ast.Dict):
+            return "dict"
+        elif isinstance(value_node, ast.Set):
+            return "set"
+        return "unknown"
     
     def visit_UnaryOp(self, node):
         """Visit unary operations."""
@@ -338,7 +389,7 @@ class ASTAnalyzer:
     
     def calculate_structural_similarity(self, unit1: CodeUnit, unit2: CodeUnit) -> float:
         """
-        Calculate structural similarity between two code units.
+        Calculate structural similarity between two code units using Bag of Words.
         
         Args:
             unit1: First code unit
@@ -350,18 +401,19 @@ class ASTAnalyzer:
         if not unit1.ast_structure or not unit2.ast_structure:
             return 0.0
         
-        # Split structure signatures into tokens
-        tokens1 = set(unit1.ast_structure.split('|'))
-        tokens2 = set(unit2.ast_structure.split('|'))
+        # Split structure signatures into tokens and count occurrences
+        tokens1 = Counter(unit1.ast_structure.split('|'))
+        tokens2 = Counter(unit2.ast_structure.split('|'))
         
-        # Calculate Jaccard similarity
-        intersection = tokens1 & tokens2
-        union = tokens1 | tokens2
+        # Calculate cosine similarity with frequency
+        intersection = sum((tokens1 & tokens2).values())
+        magnitude1 = sum(v * v for v in tokens1.values()) ** 0.5
+        magnitude2 = sum(v * v for v in tokens2.values()) ** 0.5
         
-        if not union:
+        if magnitude1 * magnitude2 == 0:
             return 0.0
         
-        return len(intersection) / len(union)
+        return intersection / (magnitude1 * magnitude2)
     
     def find_similar_units(self, target_unit: CodeUnit, candidate_units: List[CodeUnit], 
                           threshold: float = 0.7) -> List[Tuple[CodeUnit, float]]:

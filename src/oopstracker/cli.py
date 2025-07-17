@@ -63,74 +63,6 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size_bytes:.1f}TB"
 
 
-def scan_file(file_path: str, detector: ASTSimHashDetector) -> List[CodeRecord]:
-    """AST-based file scanning."""
-    # Register all code units from file
-    records = detector.register_file(file_path)
-    
-    if not records:
-        print(f"⚠️  No code units found in {file_path}")
-        return []
-    
-    # Check for duplicates among the newly registered units
-    duplicate_count = 0
-    for record in records:
-        if record.metadata and record.metadata.get('type') == 'module':
-            continue  # Skip module-level checks
-        
-        # Find similar units
-        unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
-        result = detector.find_similar(record.code_content, record.function_name, file_path)
-        
-        if result.is_duplicate and result.matched_records:
-            duplicate_count += 1
-            print(f"⚠️  DUPLICATE {unit_type} '{record.function_name or 'N/A'}' in {file_path}")
-            for matched in result.matched_records[:3]:  # Show top 3 matches
-                similarity = matched.similarity_score or 0
-                matched_file = matched.file_path or 'N/A'
-                matched_name = matched.function_name or 'N/A'
-                print(f"   Similar to: {matched_name} in {matched_file} (similarity: {similarity:.3f})")
-    
-    total_units = len(records)
-    unique_units = total_units - duplicate_count
-    
-    if duplicate_count > 0:
-        print(f"✅ Registered {total_units} units from {file_path} (⚠️ {duplicate_count} duplicates found)")
-    else:
-        print(f"✅ Registered {total_units} units from {file_path}")
-    
-    return records
-
-
-def scan_directory(directory: str, detector: ASTSimHashDetector,
-                  pattern: str = "*.py", ignore_patterns: Optional[IgnorePatterns] = None) -> List[CodeRecord]:
-    """Scan a directory for Python files."""
-    path = Path(directory)
-    if not path.exists():
-        print(f"❌ Directory does not exist: {directory}")
-        return []
-    
-    # Initialize ignore patterns if not provided
-    if ignore_patterns is None:
-        ignore_patterns = IgnorePatterns(project_root=directory)
-    
-    records = []
-    scanned_count = 0
-    ignored_count = 0
-    
-    for file_path in path.rglob(pattern):
-        if file_path.is_file():
-            if ignore_patterns.should_ignore(file_path):
-                ignored_count += 1
-                continue
-            
-            scanned_count += 1
-            file_records = scan_file(str(file_path), detector)
-            records.extend(file_records)
-    
-    print(f"📊 Scanned {scanned_count} files, ignored {ignored_count} files")
-    return records
-
 
 def main():
     """Main CLI entry point."""
@@ -163,39 +95,8 @@ def main():
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
-    # Scan command
-    scan_parser = subparsers.add_parser("scan", help="Scan files or directories")
-    scan_parser.add_argument(
-        "path",
-        help="File or directory to scan"
-    )
-    scan_parser.add_argument(
-        "--pattern", "-p",
-        default="*.py",
-        help="File pattern to match (default: *.py)"
-    )
-    scan_parser.add_argument(
-        "--ignore-file", "-i",
-        help="Path to ignore file (default: .oopsignore)"
-    )
-    scan_parser.add_argument(
-        "--no-ignore",
-        action="store_true",
-        help="Disable all ignore patterns (scan all files)"
-    )
-    scan_parser.add_argument(
-        "--no-gitignore",
-        action="store_true",
-        help="Don't respect .gitignore files (still use other ignore patterns)"
-    )
-    scan_parser.add_argument(
-        "--show-ignored",
-        action="store_true",
-        help="Show files that are being ignored"
-    )
-    
-    # Check command (unified scan + detect)
-    check_parser = subparsers.add_parser("check", help="Scan directory and check for duplicates")
+    # Check command (main functionality - unified scan + detect)
+    check_parser = subparsers.add_parser("check", help="Scan directory and find meaningful code duplicates")
     check_parser.add_argument(
         "path",
         nargs="?",
@@ -220,7 +121,39 @@ def main():
     check_parser.add_argument(
         "--show-all",
         action="store_true",
-        help="Show all duplicates, not just new ones"
+        help="Legacy option (duplicates now shown by default)"
+    )
+    check_parser.add_argument(
+        "--duplicates-only",
+        action="store_true",
+        help="Only show duplicates analysis (skip file scanning)"
+    )
+    check_parser.add_argument(
+        "--threshold",
+        type=float,
+        help="Similarity threshold for duplicates (default: uses global setting)"
+    )
+    check_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of duplicate pairs to show (default: 50)"
+    )
+    check_parser.add_argument(
+        "--fast",
+        action="store_true",
+        default=True,
+        help="Use fast SimHash pre-filtering (default: True)"
+    )
+    check_parser.add_argument(
+        "--exhaustive",
+        action="store_true",
+        help="Use exhaustive O(n²) search for maximum accuracy"
+    )
+    check_parser.add_argument(
+        "--include-trivial",
+        action="store_true",
+        help="Include trivial duplicates (pass classes, simple getters, etc.)"
     )
     
     # Register command
@@ -282,20 +215,6 @@ def main():
         help="File path for context"
     )
     
-    # Find duplicates command
-    duplicates_parser = subparsers.add_parser("duplicates", help="Find potential duplicates (AST mode only)")
-    duplicates_parser.add_argument(
-        "--threshold", "-t",
-        type=float,
-        default=0.8,
-        help="Similarity threshold (default: 0.8)"
-    )
-    duplicates_parser.add_argument(
-        "--limit", "-l",
-        type=int,
-        default=20,
-        help="Maximum number of pairs to show (default: 20)"
-    )
     
     # Relations command
     relations_parser = subparsers.add_parser("relations", help="Show relationships between code units")
@@ -372,40 +291,35 @@ def main():
     
     # Handle commands
     try:
-        if args.command == "scan":
-            path = Path(args.path)
-            
-            # Initialize ignore patterns
-            ignore_patterns = None
-            if not args.no_ignore:
-                use_gitignore = not args.no_gitignore
-                ignore_patterns = IgnorePatterns(
-                    ignore_file=args.ignore_file,
-                    project_root=str(path.parent if path.is_file() else path),
-                    use_gitignore=use_gitignore
-                )
+        if args.command == "check":
+            # If duplicates-only mode, skip file scanning
+            if args.duplicates_only:
+                print("🔍 Finding potential duplicates...")
+                threshold = args.threshold if args.threshold else args.similarity_threshold
+                use_fast_mode = not args.exhaustive
+                pairs = detector.find_potential_duplicates(threshold=threshold, use_fast_mode=use_fast_mode, include_trivial=args.include_trivial)
                 
-                if args.show_ignored:
-                    print("🚫 Using ignore patterns:")
-                    ignore_patterns.print_patterns()
-                    print()
-            
-            if path.is_file():
-                # Check if single file should be ignored
-                if ignore_patterns and ignore_patterns.should_ignore(path):
-                    print(f"🚫 File ignored by patterns: {path}")
-                    records = []
+                if not pairs:
+                    print("✅ No duplicates found")
                 else:
-                    records = scan_file(str(path), detector)
-            elif path.is_dir():
-                records = scan_directory(str(path), detector, args.pattern, ignore_patterns)
-            else:
-                print(f"❌ Invalid path: {args.path}")
-                sys.exit(1)
+                    print(f"⚠️  Found {len(pairs)} potential duplicate pairs (threshold: {threshold}):")
+                    
+                    for i, (unit1, unit2, similarity) in enumerate(pairs[:args.limit], 1):
+                        print(f"\n {i}. Similarity: {similarity:.3f}")
+                        type1 = unit1.metadata.get('type', 'unknown') if unit1.metadata else 'unknown'
+                        type2 = unit2.metadata.get('type', 'unknown') if unit2.metadata else 'unknown'
+                        
+                        # Get line information from CodeUnit if available
+                        unit1_code_unit = detector.code_units.get(unit1.code_hash)
+                        unit2_code_unit = detector.code_units.get(unit2.code_hash)
+                        
+                        line1 = f":{unit1_code_unit.start_line}" if unit1_code_unit and unit1_code_unit.start_line else ""
+                        line2 = f":{unit2_code_unit.start_line}" if unit2_code_unit and unit2_code_unit.start_line else ""
+                        
+                        print(f"    {type1}: {unit1.function_name or 'N/A'} in {unit1.file_path or 'N/A'}{line1}")
+                        print(f"    {type2}: {unit2.function_name or 'N/A'} in {unit2.file_path or 'N/A'}{line2}")
+                return
             
-            print(f"\n📊 Registered {len(records)} new code snippets")
-            
-        elif args.command == "check":
             # Unified check command: scan changed files and detect duplicates
             path = Path(args.path)
             
@@ -512,27 +426,41 @@ def main():
                 if len(duplicates_found) > 10:
                     print(f"\n   ... and {len(duplicates_found) - 10} more duplicates")
             
-            if not args.show_all:
-                print(f"\n💡 Use --show-all to see all existing duplicates")
-            else:
-                # Show all duplicates in the project
-                print(f"\n🔍 Checking all duplicates in project...")
-                duplicates = detector.find_potential_duplicates(threshold=0.8)
-                
-                if duplicates:
-                    print(f"\n⚠️  Found {len(duplicates)} duplicate pairs:")
-                    for i, (record1, record2, similarity) in enumerate(duplicates[:20], 1):
-                        type1 = record1.metadata.get('type', 'unknown') if record1.metadata else 'unknown'
-                        type2 = record2.metadata.get('type', 'unknown') if record2.metadata else 'unknown'
-                        
-                        print(f"\n{i:2d}. Similarity: {similarity:.3f}")
-                        print(f"    {type1}: {record1.function_name or 'N/A'} in {record1.file_path or 'N/A'}")
-                        print(f"    {type2}: {record2.function_name or 'N/A'} in {record2.file_path or 'N/A'}")
+            # Always show project-wide duplicates by default
+            print(f"\n🔍 Checking all duplicates in project...")
+            use_fast_mode = not args.exhaustive
+            threshold = 0.7  # More practical threshold for meaningful duplicates
+            duplicates = detector.find_potential_duplicates(threshold=threshold, use_fast_mode=use_fast_mode, include_trivial=args.include_trivial)
+            
+            if duplicates:
+                print(f"\n⚠️  Found {len(duplicates)} potential duplicate pairs (threshold: {threshold}):")
+                display_limit = 15  # Show more duplicates by default
+                for i, (record1, record2, similarity) in enumerate(duplicates[:display_limit], 1):
+                    type1 = record1.metadata.get('type', 'unknown') if record1.metadata else 'unknown'
+                    type2 = record2.metadata.get('type', 'unknown') if record2.metadata else 'unknown'
                     
-                    if len(duplicates) > 20:
-                        print(f"\n... and {len(duplicates) - 20} more pairs")
-                else:
-                    print(f"\n✅ No duplicates found!")
+                    # Get line information from CodeUnit if available
+                    unit1 = detector.code_units.get(record1.code_hash)
+                    unit2 = detector.code_units.get(record2.code_hash)
+                    
+                    line1 = f":{unit1.start_line}" if unit1 and unit1.start_line else ""
+                    line2 = f":{unit2.start_line}" if unit2 and unit2.start_line else ""
+                    
+                    print(f"\n{i:2d}. Similarity: {similarity:.3f}")
+                    print(f"    {type1}: {record1.function_name or 'N/A'} in {record1.file_path or 'N/A'}{line1}")
+                    print(f"    {type2}: {record2.function_name or 'N/A'} in {record2.file_path or 'N/A'}{line2}")
+                
+                if len(duplicates) > display_limit:
+                    print(f"\n... and {len(duplicates) - display_limit} more pairs")
+                
+                # Show helpful tips
+                if not args.include_trivial:
+                    print(f"\n💡 Use --include-trivial to see all duplicates (including simple classes)")
+                print(f"💡 Use --threshold X to adjust sensitivity (current: {threshold})")
+                print(f"💡 Use --exhaustive for higher accuracy (slower)")
+            else:
+                print(f"\n✅ No meaningful duplicates found at threshold {threshold}!")
+                print(f"💡 Try --include-trivial or lower --threshold for more results")
                 
         elif args.command == "register":
             records = detector.register_code(
@@ -656,33 +584,6 @@ def main():
                 for cls in analysis['classes']:
                     print(f"   • {cls.name} (lines {cls.start_line}-{cls.end_line}, complexity: {cls.complexity_score})")
             
-        elif args.command == "duplicates":
-            duplicates = detector.find_potential_duplicates(args.similarity_threshold)
-            
-            if not duplicates:
-                print(f"✅ No potential duplicates found with threshold {args.threshold}")
-            else:
-                print(f"\n🔍 Found {len(duplicates)} potential duplicate pairs (threshold: {args.threshold}):")
-                
-                for i, (record1, record2, similarity) in enumerate(duplicates[:args.limit], 1):
-                    type1 = record1.metadata.get('type', 'unknown') if record1.metadata else 'unknown'
-                    type2 = record2.metadata.get('type', 'unknown') if record2.metadata else 'unknown'
-                    
-                    print(f"\n{i:2d}. Similarity: {similarity:.3f}")
-                    print(f"    {type1}: {record1.function_name or 'N/A'} in {record1.file_path or 'N/A'}")
-                    print(f"    {type2}: {record2.function_name or 'N/A'} in {record2.file_path or 'N/A'}")
-                
-                if len(duplicates) > args.limit:
-                    print(f"\n... and {len(duplicates) - args.limit} more pairs")
-                    
-            # Show statistics
-            stats = detector.get_statistics()
-            print(f"\n📊 Statistics:")
-            print(f"   Total units: {stats['total_units']}")
-            print(f"   Functions: {stats['functions']}")
-            print(f"   Classes: {stats['classes']}")
-            print(f"   Modules: {stats['modules']}")
-            
         elif args.command == "relations":
             # Use auto mode by default unless manual is specified
             use_auto = not args.manual
@@ -734,7 +635,12 @@ def main():
                         if record:
                             func_name = record.function_name or 'N/A'
                             file_path = record.file_path or 'N/A'
-                            print(f"   {i:2d}. {func_name} ({file_path}) - {conn_count} connections")
+                            
+                            # Get line information from CodeUnit if available
+                            unit = detector.code_units.get(hash_code)
+                            line_info = f":{unit.start_line}" if unit and unit.start_line else ""
+                            
+                            print(f"   {i:2d}. {func_name} ({file_path}{line_info}) - {conn_count} connections")
                             
                 else:
                     print(f"   No connections found")
@@ -786,7 +692,12 @@ def main():
                             if record:
                                 func_name = record.function_name or 'N/A'
                                 file_path = record.file_path or 'N/A'
-                                print(f"   {i:2d}. {func_name} ({file_path}) - {conn_count} connections")
+                                
+                                # Get line information from CodeUnit if available
+                                unit = detector.code_units.get(hash_code)
+                                line_info = f":{unit.start_line}" if unit and unit.start_line else ""
+                                
+                                print(f"   {i:2d}. {func_name} ({file_path}{line_info}) - {conn_count} connections")
                 
                 elif args.hash:
                     # Show relations for specific code unit
@@ -807,7 +718,12 @@ def main():
                             unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
                             func_name = record.function_name or 'N/A'
                             file_path = record.file_path or 'N/A'
-                            print(f"   {i:2d}. {unit_type}: {func_name} in {file_path}")
+                            
+                            # Get line information from CodeUnit if available
+                            unit = detector.code_units.get(record.code_hash)
+                            line_info = f":{unit.start_line}" if unit and unit.start_line else ""
+                            
+                            print(f"   {i:2d}. {unit_type}: {func_name} in {file_path}{line_info}")
                             print(f"       Similarity: {similarity:.3f}")
                             print(f"       Hash: {record.code_hash[:16]}...")
                             print()
@@ -835,7 +751,12 @@ def main():
                                 unit_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
                                 func_name = record.function_name or 'N/A'
                                 file_path = record.file_path or 'N/A'
-                                print(f"   {i:2d}. {unit_type}: {func_name} ({file_path})")
+                                
+                                # Get line information from CodeUnit if available
+                                unit = detector.code_units.get(hash_code)
+                                line_info = f":{unit.start_line}" if unit and unit.start_line else ""
+                                
+                                print(f"   {i:2d}. {unit_type}: {func_name} ({file_path}{line_info})")
                                 print(f"       {conn_count} connections | Hash: {record.code_hash[:16]}...")
                                 print()
                         
