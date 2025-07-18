@@ -6,6 +6,7 @@ import argparse
 import sys
 import json
 import logging
+import asyncio
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,6 +15,7 @@ from .exceptions import OOPSTrackerError
 from .ignore_patterns import IgnorePatterns
 from .ast_simhash_detector import ASTSimHashDetector
 from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
+from .semantic_detector import SemanticAwareDuplicateDetector
 
 
 def setup_logging(level: str = "INFO"):
@@ -60,7 +62,22 @@ def setup_logging(level: str = "INFO"):
 
 
 
+async def async_main():
+    """Async main function."""
+    return await _main_impl()
+
 def main():
+    """Main CLI entry point."""
+    try:
+        return asyncio.run(async_main())
+    except KeyboardInterrupt:
+        print("\n🚫 Interrupted by user")
+        return 1
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return 1
+
+async def _main_impl():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         description="OOPStracker - AI Agent Code Loop Detection and Prevention"
@@ -81,6 +98,29 @@ def main():
         type=float,
         default=0.7,
         help="Structural similarity threshold (default: 0.7)"
+    )
+    parser.add_argument(
+        "--semantic-analysis", "--semantic",
+        action="store_true",
+        help="Enable semantic duplicate analysis using LLM (requires intent_unified)"
+    )
+    parser.add_argument(
+        "--semantic-threshold",
+        type=float,
+        default=0.7,
+        help="Semantic similarity threshold (default: 0.7)"
+    )
+    parser.add_argument(
+        "--semantic-timeout",
+        type=float,
+        default=30.0,
+        help="Timeout for semantic analysis in seconds (default: 30.0)"
+    )
+    parser.add_argument(
+        "--max-semantic-concurrent",
+        type=int,
+        default=3,
+        help="Maximum concurrent semantic analyses (default: 3)"
     )
     parser.add_argument(
         "--log-level", "-l",
@@ -285,6 +325,19 @@ def main():
         print(f"❌ Failed to initialize OOPStracker: {e}")
         sys.exit(1)
     
+    # Initialize semantic detector if semantic analysis is enabled
+    semantic_detector = None
+    if hasattr(args, 'semantic_analysis') and args.semantic_analysis:
+        try:
+            semantic_detector = SemanticAwareDuplicateDetector(intent_unified_available=True)
+            await semantic_detector.initialize()
+            print("🧠 Semantic analysis enabled (LLM-based)")
+        except Exception as e:
+            print(f"⚠️  Failed to initialize semantic analysis: {e}")
+            print("🔄 Falling back to structural analysis only")
+            semantic_detector = SemanticAwareDuplicateDetector(intent_unified_available=False)
+            await semantic_detector.initialize()
+    
     # Handle commands
     try:
         if args.command == "check":
@@ -457,6 +510,64 @@ def main():
             else:
                 print(f"\n✅ No meaningful duplicates found at threshold {threshold}!")
                 print(f"💡 Try --include-trivial or lower --threshold for more results")
+            
+            # Semantic analysis if enabled
+            if semantic_detector and hasattr(args, 'semantic_analysis') and args.semantic_analysis:
+                print(f"\n🧠 Performing semantic analysis...")
+                try:
+                    # Convert structural duplicates to CodeRecords for semantic analysis
+                    code_records = []
+                    for record1, record2, similarity in duplicates[:10]:  # Limit to top 10 for semantic analysis
+                        code_records.extend([record1, record2])
+                    
+                    # Remove duplicates from code_records
+                    unique_records = []
+                    seen_hashes = set()
+                    for record in code_records:
+                        if record.code_hash not in seen_hashes:
+                            unique_records.append(record)
+                            seen_hashes.add(record.code_hash)
+                    
+                    if unique_records:
+                        semantic_results = await semantic_detector.detect_duplicates(
+                            code_records=unique_records,
+                            enable_semantic=True,
+                            semantic_threshold=args.semantic_threshold,
+                            max_concurrent=args.max_semantic_concurrent
+                        )
+                        
+                        semantic_duplicates = semantic_results.get('semantic_duplicates', [])
+                        if semantic_duplicates:
+                            print(f"\n🔍 Semantic analysis found {len(semantic_duplicates)} meaningful duplicates:")
+                            for i, sem_dup in enumerate(semantic_duplicates[:5], 1):
+                                print(f"\n{i:2d}. Semantic similarity: {sem_dup.semantic_similarity:.3f} (confidence: {sem_dup.confidence:.3f})")
+                                print(f"    Method: {sem_dup.analysis_method}")
+                                print(f"    {sem_dup.code_record_1.function_name or 'N/A'} in {sem_dup.code_record_1.file_path or 'N/A'}")
+                                print(f"    {sem_dup.code_record_2.function_name or 'N/A'} in {sem_dup.code_record_2.file_path or 'N/A'}")
+                                print(f"    Reasoning: {sem_dup.reasoning[:100]}...")
+                            
+                            if len(semantic_duplicates) > 5:
+                                print(f"\n... and {len(semantic_duplicates) - 5} more semantic duplicates")
+                        else:
+                            print(f"\n✅ No semantic duplicates found above threshold {args.semantic_threshold}")
+                        
+                        # Show analysis summary
+                        summary = semantic_results.get('summary', {})
+                        if summary:
+                            print(f"\n📊 Semantic Analysis Summary:")
+                            print(f"   Total records analyzed: {summary.get('total_code_records', 0)}")
+                            print(f"   Semantic analyses attempted: {summary.get('semantic_analysis_attempted', 0)}")
+                            print(f"   Successful analyses: {summary.get('semantic_analysis_successful', 0)}")
+                            print(f"   Failed analyses: {summary.get('semantic_analysis_failed', 0)}")
+                            print(f"   Recommendation: {summary.get('recommendation', 'N/A')}")
+                    else:
+                        print(f"\n📝 No structural duplicates available for semantic analysis")
+                        
+                except Exception as e:
+                    print(f"\n❌ Semantic analysis failed: {e}")
+                    if args.log_level == "DEBUG":
+                        import traceback
+                        traceback.print_exc()
                 
         elif args.command == "register":
             records = detector.register_code(
@@ -776,6 +887,14 @@ def main():
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         sys.exit(1)
+    finally:
+        # Cleanup semantic detector if initialized
+        if semantic_detector:
+            try:
+                await semantic_detector.cleanup()
+            except Exception as e:
+                if args.log_level == "DEBUG":
+                    print(f"⚠️  Semantic detector cleanup failed: {e}")
 
 
 if __name__ == "__main__":

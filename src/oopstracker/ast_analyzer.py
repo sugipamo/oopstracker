@@ -155,14 +155,24 @@ class ASTStructureExtractor(ast.NodeVisitor):
         if isinstance(node.func, ast.Name):
             self.function_calls.append(node.func.id)
             self.structure_tokens.append(f"CALL:{node.func.id}")
+            self.dependencies.add(node.func.id)
         elif isinstance(node.func, ast.Attribute):
             attr_name = node.func.attr
             self.function_calls.append(attr_name)
             self.structure_tokens.append(f"CALL:{attr_name}")
+            # Add object type for method calls
+            if isinstance(node.func.value, ast.Name):
+                self.structure_tokens.append(f"METHOD_ON:{node.func.value.id}")
+                self.dependencies.add(node.func.value.id)
         
         # Add number of arguments
         self.structure_tokens.append(f"ARGS:{len(node.args)}")
-        self.structure_tokens.append(f"KWARGS:{len(node.keywords)}")
+        if node.keywords:
+            self.structure_tokens.append(f"KWARGS:{len(node.keywords)}")
+            # Add keyword argument names for better matching
+            kw_names = [kw.arg for kw in node.keywords if kw.arg]
+            if kw_names:
+                self.structure_tokens.append(f"KW_NAMES:{','.join(sorted(kw_names))}")
         
         self.generic_visit(node)
     
@@ -185,7 +195,27 @@ class ASTStructureExtractor(ast.NodeVisitor):
         """Visit binary operations."""
         op_name = node.op.__class__.__name__
         self.structure_tokens.append(f"BINOP:{op_name}")
+        # Add operand types for better matching
+        left_type = self._get_node_type(node.left)
+        right_type = self._get_node_type(node.right)
+        self.structure_tokens.append(f"BINOP_TYPES:{left_type}_{op_name}_{right_type}")
         self.generic_visit(node)
+    
+    def _get_node_type(self, node):
+        """Get simplified node type for structure tokens."""
+        if isinstance(node, ast.Name):
+            return "var"
+        elif isinstance(node, ast.Constant):
+            return type(node.value).__name__
+        elif isinstance(node, ast.Call):
+            return "call"
+        elif isinstance(node, ast.List):
+            return "list"
+        elif isinstance(node, ast.Dict):
+            return "dict"
+        elif isinstance(node, ast.BinOp):
+            return "binop"
+        return "expr"
     
     def visit_Compare(self, node):
         """Visit comparisons."""
@@ -241,6 +271,18 @@ class ASTStructureExtractor(ast.NodeVisitor):
         self.structure_tokens.append("RETURN")
         if node.value:
             self.structure_tokens.append("RETURN_VALUE")
+            # Add return value type info
+            if isinstance(node.value, ast.Name):
+                self.structure_tokens.append(f"RETURN_VAR:{node.value.id}")
+            elif isinstance(node.value, ast.Constant):
+                self.structure_tokens.append(f"RETURN_CONST:{type(node.value.value).__name__}")
+            elif isinstance(node.value, ast.List):
+                self.structure_tokens.append(f"RETURN_LIST_SIZE:{len(node.value.elts)}")
+            elif isinstance(node.value, ast.Dict):
+                self.structure_tokens.append(f"RETURN_DICT_SIZE:{len(node.value.keys)}")
+            elif isinstance(node.value, ast.Call):
+                if isinstance(node.value.func, ast.Name):
+                    self.structure_tokens.append(f"RETURN_CALL:{node.value.func.id}")
         self.generic_visit(node)
     
     def visit_Raise(self, node):

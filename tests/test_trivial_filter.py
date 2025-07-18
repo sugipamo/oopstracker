@@ -15,32 +15,32 @@ class TestTrivialPatternFilter:
         self.filter = TrivialPatternFilter()
         self.config = TrivialFilterConfig()
     
-    def test_single_return_function_excluded(self):
-        """Test that single return functions are excluded."""
-        code = '''
-def get_level(self):
-    return self.level
-'''
-        record = CodeRecord(code_content=code, function_name="get_level")
-        assert self.filter.should_exclude_code_record(record) == True
+    def _assert_should_exclude(self, code: str, function_name: str, expected: bool, description: str = None):
+        """Centralized assertion helper for exclusion tests.
+        
+        Args:
+            code: Code content to test
+            function_name: Name of the function/class
+            expected: Expected exclusion result
+            description: Optional description for debugging
+        """
+        record = CodeRecord(code_content=code, function_name=function_name)
+        result = self.filter.should_exclude_code_record(record)
+        if description:
+            assert result == expected, f"Failed: {description}"
+        else:
+            assert result == expected
     
-    def test_single_return_with_attribute_excluded(self):
-        """Test that single return with attribute access is excluded."""
-        code = '''
-def get_value(self):
-    return self._value
-'''
-        record = CodeRecord(code_content=code, function_name="get_value")
-        assert self.filter.should_exclude_code_record(record) == True
-    
-    def test_single_return_constant_excluded(self):
-        """Test that single return with constant is excluded."""
-        code = '''
-def get_default(self):
-    return 42
-'''
-        record = CodeRecord(code_content=code, function_name="get_default")
-        assert self.filter.should_exclude_code_record(record) == True
+    def test_simple_return_functions_excluded(self):
+        """Test that simple return functions are excluded."""
+        test_cases = [
+            ('def get_level(self):\n    return self.level', 'get_level', 'attribute access'),
+            ('def get_value(self):\n    return self._value', 'get_value', 'private attribute access'),
+            ('def get_default(self):\n    return 42', 'get_default', 'constant return'),
+        ]
+        
+        for code, func_name, description in test_cases:
+            self._assert_should_exclude(code, func_name, True, f"Simple return with {description}")
     
     def test_complex_function_not_excluded(self):
         """Test that complex functions are not excluded."""
@@ -59,12 +59,8 @@ def process_data(self, data):
     
     def test_simple_special_method_excluded(self):
         """Test that simple special methods are excluded."""
-        code = '''
-def __str__(self):
-    return self.name
-'''
-        record = CodeRecord(code_content=code, function_name="__str__")
-        assert self.filter.should_exclude_code_record(record) == True
+        code = 'def __str__(self):\n    return self.name'
+        self._assert_should_exclude(code, '__str__', True, 'Simple __str__ method')
     
     def test_complex_special_method_not_excluded(self):
         """Test that complex special methods are not excluded."""
@@ -80,24 +76,15 @@ def __str__(self):
         record = CodeRecord(code_content=code, function_name="__str__")
         assert self.filter.should_exclude_code_record(record) == False
     
-    def test_trivial_class_excluded(self):
+    def test_trivial_classes_excluded(self):
         """Test that trivial classes are excluded."""
-        code = '''
-class EmptyClass:
-    pass
-'''
-        record = CodeRecord(code_content=code, function_name="EmptyClass")
-        assert self.filter.should_exclude_code_record(record) == True
-    
-    def test_class_with_docstring_only_excluded(self):
-        """Test that classes with only docstring are excluded."""
-        code = '''
-class DocumentedClass:
-    """This class does nothing."""
-    pass
-'''
-        record = CodeRecord(code_content=code, function_name="DocumentedClass")
-        assert self.filter.should_exclude_code_record(record) == True
+        test_cases = [
+            ('class EmptyClass:\n    pass', 'EmptyClass', 'empty class'),
+            ('class DocumentedClass:\n    """This class does nothing."""\n    pass', 'DocumentedClass', 'docstring-only class'),
+        ]
+        
+        for code, class_name, description in test_cases:
+            self._assert_should_exclude(code, class_name, True, f"Trivial class: {description}")
     
     def test_functional_class_not_excluded(self):
         """Test that functional classes are not excluded."""

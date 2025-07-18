@@ -39,8 +39,18 @@ dependencies = [
     "uvicorn>=0.33.0",
     "xxhash>=3.4.0",
     "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "aiosqlite>=0.19.0",
+    "httpx>=0.24.0",
+    "python-dotenv>=1.0.0",
+    "numpy>=1.24.0",
+    "llm-providers @ file:///home/coding/code-smith/util/llm-providers",
     "tqdm>=4.65.0",
     "colorama>=0.4.6",
+    "intent-tree @ file:///home/coding/code-smith/code-generation/intent/intent_tree",
+    "intent-unified @ file:///home/coding/code-smith/code-generation/intent/intent-unified",
+    "evocraft-logging @ file:///home/coding/code-smith/util/logging/evocraft-logging",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +84,9 @@ oopstracker = "oopstracker.cli:main"
 
 [tool.hatch.version]
 path = "src/oopstracker/__init__.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 include = [

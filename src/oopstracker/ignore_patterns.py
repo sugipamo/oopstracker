@@ -48,6 +48,9 @@ class IgnorePatterns:
         
         # Package management
         "site-packages/",
+        
+        # Python initialization files
+        "__init__.py",
         "*/site-packages/*",
         ".local/lib/python*/site-packages/",
         "lib/python*/site-packages/",
