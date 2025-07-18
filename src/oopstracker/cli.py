@@ -191,6 +191,23 @@ async def _main_impl():
         action="store_true",
         help="Include trivial duplicates (pass classes, simple getters, etc.)"
     )
+    check_parser.add_argument(
+        "--semantic", "-s",
+        action="store_true",
+        default=True,
+        help="Enable semantic analysis using LLM (default: True)"
+    )
+    check_parser.add_argument(
+        "--no-semantic",
+        action="store_true",
+        help="Disable semantic analysis"
+    )
+    check_parser.add_argument(
+        "--semantic-threshold",
+        type=float,
+        default=0.7,
+        help="Semantic similarity threshold (default: 0.7)"
+    )
     
     # Register command
     register_parser = subparsers.add_parser("register", help="Register a code snippet")
@@ -325,8 +342,21 @@ async def _main_impl():
         print(f"❌ Failed to initialize OOPStracker: {e}")
         sys.exit(1)
     
-    # Initialize semantic detector if semantic analysis is enabled
+    # Initialize semantic detector based on command and options
     semantic_detector = None
+    
+    # For check command, use semantic analysis by default unless --no-semantic is specified
+    if args.command == "check":
+        if not args.no_semantic:
+            # Override global semantic_analysis setting for check command
+            args.semantic_analysis = True
+            # Use check command's semantic threshold if specified
+            if hasattr(args, 'semantic_threshold') and args.semantic_threshold:
+                args.semantic_threshold = args.semantic_threshold
+        else:
+            args.semantic_analysis = False
+    
+    # Initialize semantic detector if enabled
     if hasattr(args, 'semantic_analysis') and args.semantic_analysis:
         try:
             semantic_detector = SemanticAwareDuplicateDetector(intent_unified_available=True)
