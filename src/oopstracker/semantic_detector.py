@@ -9,6 +9,9 @@ from enum import Enum
 from .models import CodeRecord
 from .ast_simhash_detector import ASTSimHashDetector
 from .intent_tree_fixed_adapter import FixedIntentTreeAdapter
+from .integrations.intent_tree_integration import IntentTreeIntegration
+from .integrations.interactive_explorer import InteractiveExplorer
+from .integrations.learning_stats_manager import LearningStatsManager
 
 
 class SemanticAnalysisStatus(Enum):
@@ -49,7 +52,12 @@ class SemanticAwareDuplicateDetector:
         self._intent_unified_facade = None
         # Removed hardcoded timeout - use LLM-Providers default
         self._semantic_threshold = 0.7
-        self.intent_tree_adapter = FixedIntentTreeAdapter(enable_intent_tree)
+        
+        # Initialize integrations
+        self.intent_tree_integration = IntentTreeIntegration(enable_intent_tree)
+        self.intent_tree_adapter = self.intent_tree_integration.intent_tree_adapter
+        self.interactive_explorer = InteractiveExplorer(self.intent_tree_adapter)
+        self.learning_stats_manager = LearningStatsManager(self.intent_tree_adapter)
         
     async def initialize(self) -> None:
         """Initialize semantic analysis components."""
