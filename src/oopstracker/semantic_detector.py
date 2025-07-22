@@ -12,6 +12,8 @@ from .intent_tree_fixed_adapter import FixedIntentTreeAdapter
 from .integrations.intent_tree_integration import IntentTreeIntegration
 from .integrations.interactive_explorer import InteractiveExplorer
 from .integrations.learning_stats_manager import LearningStatsManager
+from .result_aggregator import ResultAggregator
+from .semantic_analysis_coordinator import SemanticAnalysisCoordinator
 
 
 class SemanticAnalysisStatus(Enum):
@@ -49,8 +51,6 @@ class SemanticAwareDuplicateDetector:
         self.intent_unified_available = intent_unified_available
         self.structural_detector = ASTSimHashDetector()
         self.logger = logging.getLogger(__name__)
-        self._intent_unified_facade = None
-        # Removed hardcoded timeout - use LLM-Providers default
         self._semantic_threshold = 0.7
         
         # Initialize integrations
@@ -58,6 +58,10 @@ class SemanticAwareDuplicateDetector:
         self.intent_tree_adapter = self.intent_tree_integration.intent_tree_adapter
         self.interactive_explorer = InteractiveExplorer(self.intent_tree_adapter)
         self.learning_stats_manager = LearningStatsManager(self.intent_tree_adapter)
+        
+        # Initialize new components
+        self.result_aggregator = ResultAggregator()
+        self.semantic_coordinator = SemanticAnalysisCoordinator(intent_unified_available)
         
     async def initialize(self) -> None:
         """Initialize semantic analysis components."""
@@ -83,6 +87,9 @@ class SemanticAwareDuplicateDetector:
                     print(f"✅ Intent tree initialized with {snippets_count} snippets and {features_count} features")
             except Exception as e:
                 print(f"Warning: Failed to initialize intent tree status display: {e}")
+        
+        # Initialize semantic coordinator
+        await self.semantic_coordinator.initialize()
         
         if self.intent_unified_available:
             try:
@@ -148,7 +155,7 @@ class SemanticAwareDuplicateDetector:
         
         # Phase 2: Semantic analysis (if enabled and available)
         semantic_results = []
-        if enable_semantic and self.intent_unified_available and self._intent_unified_facade:
+        if enable_semantic and self.semantic_coordinator.intent_unified_available:
             semantic_results = await self._analyze_semantic_duplicates(
                 code_records=code_records,
                 structural_candidates=structural_results.get("high_confidence", []),
@@ -157,21 +164,24 @@ class SemanticAwareDuplicateDetector:
             )
         
         # Phase 3: Intent tree analysis (if available)
-        intent_tree_results = await self._analyze_with_intent_tree(code_records)
+        intent_tree_results = await self.semantic_coordinator.analyze_with_intent_tree(
+            code_records, self.intent_tree_adapter
+        )
         
-        # Phase 4: Combine results
-        combined_results = self._combine_results(
-            structural_results, semantic_results, code_records
+        # Phase 4: Aggregate results
+        analysis_result = self.result_aggregator.aggregate_results(
+            structural_results, semantic_results, len(code_records)
         )
         
         return {
             "structural_duplicates": structural_results,
             "semantic_duplicates": semantic_results,
-            "combined_analysis": combined_results,
+            "combined_analysis": {
+                "summary": analysis_result.summary,
+                "recommendation": analysis_result.recommendation
+            },
             "intent_tree_analysis": intent_tree_results,
-            "summary": self._generate_summary(
-                structural_results, semantic_results, len(code_records)
-            )
+            "summary": analysis_result.summary
         }
     
     async def _detect_structural_duplicates(
@@ -237,8 +247,6 @@ class SemanticAwareDuplicateDetector:
         max_concurrent: int
     ) -> List[SemanticDuplicateResult]:
         """Analyze semantic duplicates for structural candidates."""
-        if not self._intent_unified_facade:
-            return []
         
         # Convert structural candidates to code pairs
         code_pairs = []
@@ -264,11 +272,8 @@ class SemanticAwareDuplicateDetector:
                 try:
                     start_time = asyncio.get_event_loop().time()
                     
-                    similarity = await asyncio.wait_for(
-                        self._intent_unified_facade.analyze_semantic_similarity(
-                            code1, code2  # Use LLM-Providers default timeout
-                        ),
-                        # Use LLM-Providers default timeout
+                    result = await self.semantic_coordinator.analyze_semantic_similarity(
+                        code1, code2, intent_tree_adapter=self.intent_tree_adapter
                     )
                     
                     analysis_time = asyncio.get_event_loop().time() - start_time
@@ -276,13 +281,13 @@ class SemanticAwareDuplicateDetector:
                     return SemanticDuplicateResult(
                         code_record_1=candidate[0],
                         code_record_2=candidate[1],
-                        semantic_similarity=similarity.similarity_score,
-                        confidence=similarity.confidence,
-                        analysis_method=similarity.method.value,
-                        reasoning=similarity.reasoning,
+                        semantic_similarity=result.get("similarity", 0.0),
+                        confidence=result.get("confidence", 0.0),
+                        analysis_method=result.get("method", "unknown"),
+                        reasoning=result.get("reasoning", ""),
                         analysis_time=analysis_time,
                         status=SemanticAnalysisStatus.SUCCESS,
-                        metadata=similarity.metadata
+                        metadata=result.get("details", {})
                     )
                     
                 except asyncio.TimeoutError:
@@ -379,85 +384,13 @@ class SemanticAwareDuplicateDetector:
             "structural_only": len(structural_results.get("high_confidence", [])) - len(semantic_results)
         }
     
-    def _generate_summary(self, structural_results: Dict[str, Any], semantic_results: List[SemanticDuplicateResult], total_records: int) -> Dict[str, Any]:
-        """Generate summary of duplicate detection results."""
-        
-        successful_semantic = sum(1 for r in semantic_results if r.status == SemanticAnalysisStatus.SUCCESS)
-        failed_semantic = len(semantic_results) - successful_semantic
-        
-        return {
-            "total_code_records": total_records,
-            "structural_duplicates_found": structural_results.get("total_found", 0),
-            "semantic_analysis_attempted": len(semantic_results),
-            "semantic_analysis_successful": successful_semantic,
-            "semantic_analysis_failed": failed_semantic,
-            "high_confidence_duplicates": len(structural_results.get("high_confidence", [])),
-            "semantic_service_available": self.intent_unified_available,
-            "recommendation": self._get_recommendation(structural_results, semantic_results)
-        }
-    
-    def _get_recommendation(self, structural_results: Dict[str, Any], semantic_results: List[SemanticDuplicateResult]) -> str:
-        """Get recommendation based on analysis results."""
-        
-        if not self.intent_unified_available:
-            return "Semantic analysis unavailable - structural analysis only performed"
-        
-        successful_semantic = sum(1 for r in semantic_results if r.status == SemanticAnalysisStatus.SUCCESS)
-        high_confidence_structural = len(structural_results.get("high_confidence", []))
-        
-        if successful_semantic == 0 and high_confidence_structural == 0:
-            return "No duplicates detected"
-        elif successful_semantic > 0:
-            return f"Found {successful_semantic} semantic duplicates requiring attention"
-        else:
-            return f"Found {high_confidence_structural} structural duplicates - consider manual review"
     
     async def quick_semantic_check(self, code1: str, code2: str, language: str = "python") -> Dict[str, Any]:
         """Quick semantic similarity check for two code fragments."""
-        
-        if not self.intent_unified_available or not self._intent_unified_facade:
-            return {
-                "available": False,
-                "similarity": 0.0,
-                "confidence": 0.0,
-                "method": "unavailable",
-                "reasoning": "Semantic analysis not available"
-            }
-        
-        try:
-            similarity = await self._intent_unified_facade.analyze_semantic_similarity(
-                code1, code2, language=language  # Use LLM-Providers default timeout
-            )
-            
-            return {
-                "available": True,
-                "similarity": similarity.similarity_score,
-                "confidence": similarity.confidence,
-                "method": similarity.method.value,
-                "reasoning": similarity.reasoning,
-                "analysis_time": similarity.analysis_time
-            }
-        except Exception as e:
-            return {
-                "available": True,
-                "similarity": 0.0,
-                "confidence": 0.0,
-                "method": "error",
-                "reasoning": f"Analysis failed: {str(e)}",
-                "error": str(e)
-            }
+        return await self.semantic_coordinator.analyze_semantic_similarity(
+            code1, code2, language, self.intent_tree_adapter
+        )
     
-    def _normalize_code_indentation(self, code: str) -> str:
-        """Normalize code indentation by removing common leading whitespace."""
-        import textwrap
-        
-        # Remove common leading whitespace from all lines
-        normalized = textwrap.dedent(code)
-        
-        # Also replace tabs with spaces
-        normalized = normalized.expandtabs(4)
-        
-        return normalized.strip()
     
     async def _analyze_with_intent_tree(self, code_records: List[CodeRecord]) -> Dict[str, Any]:
         """Analyze code records using intent_tree for akinator-style exploration."""
