@@ -14,8 +14,12 @@ __author__ = "EvoCode Team"
 __email__ = "info@evocoder.ai"
 __license__ = "MIT"
 
-# New unified interface (recommended)
-from .unified_interface import UnifiedOOPStracker, AnalysisConfig, AnalysisSummary
+# New layered architecture (recommended)
+from .application import OOPSTrackerFacade, create_oopstracker
+from .services import UnifiedConfig, AnalysisConfig, DatabaseConfig
+
+# Legacy unified interface (backward compatibility) 
+from .unified_interface import UnifiedOOPStracker, AnalysisSummary
 
 # Legacy interfaces (for backward compatibility)
 from .core import CodeMemory
@@ -26,9 +30,15 @@ from .hybrid_detector import HybridCodeMemory, HybridResult, create_hybrid_memor
 from .refactoring_analyzer import RefactoringAnalyzer, RefactoringRecommendation, RefactoringType
 
 __all__ = [
-    # New unified interface (recommended)
-    "UnifiedOOPStracker",
+    # New layered architecture (recommended)
+    "OOPSTrackerFacade",
+    "create_oopstracker", 
+    "UnifiedConfig",
     "AnalysisConfig", 
+    "DatabaseConfig",
+    
+    # Legacy unified interface (backward compatibility)
+    "UnifiedOOPStracker",
     "AnalysisSummary",
     
     # Legacy interfaces (backward compatibility)

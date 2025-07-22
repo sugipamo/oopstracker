@@ -19,6 +19,7 @@ from .ast_simhash_detector import ASTSimHashDetector
 from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
 from .semantic_detector import SemanticAwareDuplicateDetector
 from .progress_reporter import ProgressReporter
+from .commands import CommandContext, COMMAND_REGISTRY
 
 
 def setup_logging(level: str = "WARNING"):
@@ -485,7 +486,7 @@ async def _main_impl():
             print(f"🧠 AST-based structural analysis (hamming threshold: {args.hamming_threshold})")
     except Exception as e:
         print(f"❌ Failed to initialize OOPStracker: {e}")
-        sys.exit(1)
+        return 1
     
     # Initialize semantic detector based on command and options
     semantic_detector = None
@@ -511,8 +512,22 @@ async def _main_impl():
             semantic_detector = SemanticAwareDuplicateDetector(intent_unified_available=False, enable_intent_tree=True)
             await semantic_detector.initialize()
     
+    # Create command context
+    context = CommandContext(
+        detector=detector,
+        semantic_detector=semantic_detector,
+        args=args
+    )
+    
     # Handle commands
     try:
+        # Use command handler if available
+        if args.command in COMMAND_REGISTRY:
+            command_class = COMMAND_REGISTRY[args.command]
+            command = command_class(context)
+            return await command.execute()
+        
+        # Legacy command handling (will be removed after full migration)
         if args.command == "check":
             # If duplicates-only mode, skip file scanning
             if args.duplicates_only:
@@ -536,7 +551,7 @@ async def _main_impl():
                     
                     for i, (unit1, unit2, similarity) in enumerate(pairs[:args.limit], 1):
                         print(format_duplicate_pair(detector, unit1, unit2, similarity, i))
-                return
+                return 0
             
             # Unified check command: scan changed files and detect duplicates
             path = Path(args.path)
@@ -1044,7 +1059,7 @@ async def _main_impl():
                 confirm = input("Are you sure you want to clear all registered code? (y/N): ")
                 if confirm.lower() != 'y':
                     print("Operation cancelled")
-                    sys.exit(0)
+                    return 0)
             
             detector.clear_memory()
             print("✅ Memory cleared successfully")
@@ -1259,7 +1274,7 @@ async def _main_impl():
             if not semantic_detector:
                 print("❌ Akinator mode requires semantic analysis")
                 print("   Please ensure intent_tree is available")
-                sys.exit(1)
+                return 1)
                 
             print("🎯 Starting Akinator-style code exploration...")
             print("   This will ask you questions to find similar code")
@@ -1271,7 +1286,7 @@ async def _main_impl():
                 
                 if not exploration_result.get("available", False):
                     print(f"❌ Exploration not available: {exploration_result.get('reason', 'Unknown error')}")
-                    sys.exit(1)
+                    return 1)
                 
                 session_id = exploration_result["session_id"]
                 question_count = 0
@@ -1320,12 +1335,12 @@ async def _main_impl():
                                     break
                                 elif response in ['quit', 'q']:
                                     print("🛑 Exploration cancelled")
-                                    sys.exit(0)
+                                    return 0)
                                 else:
                                     print("   Please answer 'yes', 'no', or 'quit'")
                             except KeyboardInterrupt:
                                 print("\n🛑 Exploration cancelled")
-                                sys.exit(0)
+                                return 0)
                     
                     # Process answer
                     matches = answer == "yes"
@@ -1405,20 +1420,20 @@ async def _main_impl():
                 if args.log_level == "DEBUG":
                     import traceback
                     traceback.print_exc()
-                sys.exit(1)
+                return 1)
             
         else:
             parser.print_help()
             
     except OOPSTrackerError as e:
         print(f"❌ OOPStracker error: {e}")
-        sys.exit(1)
+        return 1)
     except KeyboardInterrupt:
         print("\n⏹️  Operation interrupted by user")
-        sys.exit(1)
+        return 1)
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        sys.exit(1)
+        return 1)
     finally:
         # Cleanup semantic detector if initialized
         if semantic_detector:

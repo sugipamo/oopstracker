@@ -11,6 +11,7 @@ from .models import CodeRecord, SimilarityResult
 # Moved CodeNormalizer import to avoid circular import
 import ast
 from .exceptions import CodeAnalysisError
+from .services.code_normalization_service import CodeNormalizationService
 
 
 class BKTree:
@@ -207,6 +208,7 @@ class SimHashSimilarityDetector:
         self.threshold = threshold
         self.bk_tree = BKTree()
         self.logger = logging.getLogger(__name__)
+        self._normalization_service = CodeNormalizationService()
     
     def _normalize_code(self, code: str) -> str:
         """Normalize code by removing comments, extra whitespace, and standardizing format."""
