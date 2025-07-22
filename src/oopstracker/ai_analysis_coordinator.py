@@ -9,6 +9,7 @@ import re
 from typing import Dict, List, Optional, Any, Union, Tuple
 from abc import ABC, abstractmethod
 from datetime import datetime
+from dataclasses import dataclass
 
 # Import extracted modules
 from .ai_analysis_models import AnalysisRequest, ClassificationRule, AnalysisResponse
@@ -26,18 +27,7 @@ except ImportError as e:
     AI_AVAILABLE = False
 
 
-@dataclass
-class AnalysisRequest:
-    # Data models have been extracted to ai_analysis_models.py
-
-
-# ClassificationRule has been moved to ai_analysis_models.py
-
-
-# AnalysisResponse has been moved to ai_analysis_models.py
-
-
-# ClassificationRuleRepository has been extracted to classification_rule_repository.py
+# Data models have been extracted to their respective modules
 
 
 class AIAnalysisInterface(ABC):
