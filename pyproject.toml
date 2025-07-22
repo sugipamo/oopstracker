@@ -45,12 +45,13 @@ dependencies = [
     "httpx>=0.24.0",
     "python-dotenv>=1.0.0",
     "numpy>=1.24.0",
-    "llm-providers @ file:///home/coding/code-smith/util/llm-providers",
+    "llm-providers",
     "tqdm>=4.65.0",
     "colorama>=0.4.6",
-    "intent-tree @ file:///home/coding/code-smith/code-generation/intent/intent_tree",
-    "intent-unified @ file:///home/coding/code-smith/code-generation/intent/intent-unified",
-    "evocraft-logging @ file:///home/coding/code-smith/util/logging/evocraft-logging",
+    "intent-tree",
+    "intent-unified",
+    "evocraft-logging",
+    "pattern-intent",
 ]
 
 [project.optional-dependencies]
@@ -80,7 +81,8 @@ Repository = "https://github.com/evocoder/oopstracker"
 Issues = "https://github.com/evocoder/oopstracker/issues"
 
 [project.scripts]
-oopstracker = "oopstracker.cli:main"
+oopstracker = "oopstracker.cli_simplified:main"
+oopstracker-legacy = "oopstracker.cli:main"
 
 [tool.hatch.version]
 path = "src/oopstracker/__init__.py"
@@ -153,6 +155,13 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+[tool.uv.sources]
+pattern-intent = { workspace = true }
+llm-providers = { workspace = true }
+intent-tree = { workspace = true }
+intent-unified = { workspace = true }
+evocraft-logging = { workspace = true }
 
 [dependency-groups]
 dev = [

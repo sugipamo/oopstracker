@@ -119,7 +119,7 @@ class IgnorePatterns:
     ]
     
     def __init__(self, ignore_file: Optional[str] = None, project_root: Optional[str] = None, 
-                 use_gitignore: bool = True):
+                 use_gitignore: bool = True, include_tests: bool = False):
         """
         Initialize ignore patterns.
         
@@ -127,10 +127,12 @@ class IgnorePatterns:
             ignore_file: Path to .oopsignore file (default: .oopsignore)
             project_root: Project root directory (default: current directory)
             use_gitignore: Whether to respect .gitignore files (default: True)
+            include_tests: Whether to include test directories and test functions (default: False)
         """
         self.project_root = Path(project_root or os.getcwd()).resolve()
         self.ignore_file = ignore_file or ".oopsignore"
         self.use_gitignore = use_gitignore
+        self.include_tests = include_tests
         self.patterns: Set[str] = set()
         self.gitignore_patterns: Set[str] = set()
         
@@ -223,6 +225,27 @@ class IgnorePatterns:
         
         return pattern
     
+    def _is_test_file(self, file_path: Path, path_str: str) -> bool:
+        """Check if a file is a test file that should be excluded by default."""
+        # Check if in test directories
+        test_dirs = ['test', 'tests', 'testing', '__test__', '__tests__']
+        path_parts = Path(path_str).parts
+        
+        # Check if any part of the path is a test directory
+        if any(part.lower() in test_dirs for part in path_parts):
+            return True
+        
+        # Check if filename starts with 'test_' or ends with '_test.py'
+        filename = file_path.name.lower()
+        if filename.startswith('test_') or filename.endswith('_test.py'):
+            return True
+        
+        # Check if filename contains 'test' and is a Python file
+        if 'test' in filename and filename.endswith('.py'):
+            return True
+        
+        return False
+    
     def _matches_gitignore_patterns(self, path_str: str, path_parts: tuple) -> bool:
         """Check if path matches any .gitignore patterns."""
         for pattern in self.gitignore_patterns:
@@ -273,6 +296,10 @@ class IgnorePatterns:
         
         path_str = str(rel_path)
         path_parts = rel_path.parts
+        
+        # Check test exclusion first (if tests not included)
+        if not self.include_tests and self._is_test_file(file_path, path_str):
+            return True
         
         # Check gitignore patterns first
         if self._matches_gitignore_patterns(path_str, path_parts):

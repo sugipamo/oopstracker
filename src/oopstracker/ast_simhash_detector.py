@@ -12,6 +12,8 @@ from .models import CodeRecord, SimilarityResult
 from .simhash_detector import BKTree
 from .ast_database import ASTDatabaseManager
 from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
+from .progress_reporter import ProgressReporter
+from .code_filter_utility import CodeFilterUtility
 
 
 logger = logging.getLogger(__name__)
@@ -22,13 +24,14 @@ class ASTSimHashDetector:
     AST-based SimHash detector for structural code similarity.
     """
     
-    def __init__(self, hamming_threshold: int = 10, db_path: str = "oopstracker_ast.db"):
+    def __init__(self, hamming_threshold: int = 10, db_path: str = "oopstracker_ast.db", include_tests: bool = False):
         """
         Initialize AST SimHash detector.
         
         Args:
             hamming_threshold: Maximum Hamming distance for similarity
             db_path: Path to SQLite database for persistence
+            include_tests: Whether to include test functions in analysis (default: False)
         """
         self.hamming_threshold = hamming_threshold
         self.analyzer = ASTAnalyzer()
@@ -39,8 +42,11 @@ class ASTSimHashDetector:
         # Initialize database
         self.db_manager = ASTDatabaseManager(db_path)
         
-        # Initialize trivial pattern filter
-        self.trivial_filter = TrivialPatternFilter(TrivialFilterConfig())
+        # Initialize trivial pattern filter (keep for compatibility)
+        self.trivial_filter = TrivialPatternFilter(TrivialFilterConfig(), include_tests=include_tests)
+        
+        # Initialize unified code filter utility
+        self.code_filter = CodeFilterUtility(include_tests=include_tests, include_trivial=False)
         
         # Cache for duplicate detection results
         self._duplicates_cache: Dict[str, List[Tuple[CodeRecord, CodeRecord, float]]] = {}
@@ -417,7 +423,7 @@ class ASTSimHashDetector:
         """
         return list(self.records.values())
     
-    def find_potential_duplicates(self, threshold: float = 0.8, use_fast_mode: bool = True, use_cache: bool = True, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+    def find_potential_duplicates(self, threshold: float = 0.8, use_fast_mode: bool = True, use_cache: bool = True, include_trivial: bool = False, silent: bool = False, top_percent: Optional[float] = None) -> List[Tuple[CodeRecord, CodeRecord, float]]:
         """
         Find potential duplicate pairs across all registered code.
         
@@ -426,10 +432,16 @@ class ASTSimHashDetector:
             use_fast_mode: Use SimHash for pre-filtering (much faster)
             use_cache: Use cached results if available
             include_trivial: Include trivial duplicates (pass classes, simple getters, etc.)
+            silent: If True, suppress progress messages
+            top_percent: If provided, dynamically adjust threshold to capture top N% of duplicates
             
         Returns:
             List of (record1, record2, similarity_score) tuples
         """
+        # Handle dynamic threshold adjustment for top N%
+        if top_percent is not None:
+            return self._find_top_percent_duplicates(top_percent, use_fast_mode, include_trivial, silent)
+        
         logger.info(f"Searching for potential duplicates with threshold {threshold} (fast_mode: {use_fast_mode}, cache: {use_cache}, include_trivial: {include_trivial})")
         
         # Check cache
@@ -444,9 +456,9 @@ class ASTSimHashDetector:
         records = list(self.records.values())
         
         if use_fast_mode:
-            duplicates = self._find_duplicates_fast(records, threshold, include_trivial)
+            duplicates = self._find_duplicates_fast(records, threshold, include_trivial, silent)
         else:
-            duplicates = self._find_duplicates_exhaustive(records, threshold, include_trivial)
+            duplicates = self._find_duplicates_exhaustive(records, threshold, include_trivial, silent)
         
         # Update cache
         if use_cache:
@@ -456,7 +468,7 @@ class ASTSimHashDetector:
         
         return duplicates
     
-    def _find_duplicates_fast(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+    def _find_duplicates_fast(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False, silent: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
         """Fast duplicate detection using SimHash pre-filtering."""
         duplicates = []
         processed_pairs = set()
@@ -475,19 +487,23 @@ class ASTSimHashDetector:
             # Use new trivial filter instead of old _is_meaningful_for_refactoring
             meaningful_records = []
             for record in records:
-                if not self.trivial_filter.should_exclude_code_record(record):
-                    if self._is_meaningful_for_refactoring(record):
-                        meaningful_records.append(record)
+                if not self.code_filter.should_exclude_record(record):
+                    meaningful_records.append(record)
             logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
         
         total_records = len(meaningful_records)
         processed_count = 0
         
+        # Create progress reporter
+        progress_reporter = ProgressReporter(
+            interval_seconds=5.0,
+            min_items_for_display=100,
+            silent=silent
+        )
+        
         for i, record1 in enumerate(meaningful_records):
             # Show progress for large datasets
-            if total_records > 100 and (i + 1) % 50 == 0:
-                progress = (i + 1) / total_records * 100
-                print(f"   Processing: {i + 1}/{total_records} records ({progress:.1f}%)")
+            progress_reporter.print_progress(i + 1, total_records, unit="records")
             
             unit1 = self.code_units.get(record1.code_hash)
             if not unit1 or record1.simhash is None:
@@ -528,7 +544,7 @@ class ASTSimHashDetector:
         logger.info(f"Found {len(duplicates)} potential duplicates with fast mode")
         return duplicates
     
-    def _find_duplicates_exhaustive(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+    def _find_duplicates_exhaustive(self, records: List[CodeRecord], threshold: float, include_trivial: bool = False, silent: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
         """Exhaustive O(n²) duplicate detection for maximum accuracy."""
         duplicates = []
         
@@ -540,9 +556,8 @@ class ASTSimHashDetector:
             # Use new trivial filter instead of old _is_meaningful_for_refactoring
             meaningful_records = []
             for record in records:
-                if not self.trivial_filter.should_exclude_code_record(record):
-                    if self._is_meaningful_for_refactoring(record):
-                        meaningful_records.append(record)
+                if not self.code_filter.should_exclude_record(record):
+                    meaningful_records.append(record)
             logger.info(f"Filtered to {len(meaningful_records)} meaningful records from {len(records)} total")
         
         for i, record1 in enumerate(meaningful_records):
@@ -810,6 +825,14 @@ class ASTSimHashDetector:
         total_pairs = len(records) * (len(records) - 1) // 2
         processed = 0
         
+        # Create progress reporter for graph building
+        progress_reporter = ProgressReporter(
+            interval_seconds=5.0,
+            min_items_for_display=1000,
+            silent=False,
+            prefix=""  # Use empty prefix for logger output
+        )
+        
         for i, record1 in enumerate(records):
             unit1 = self.code_units.get(record1.code_hash)
             if not unit1:
@@ -821,8 +844,11 @@ class ASTSimHashDetector:
                     continue
                 
                 processed += 1
-                if processed % 1000 == 0:
-                    logger.info(f"Progress: {processed}/{total_pairs} pairs ({processed*100/total_pairs:.1f}%)")
+                
+                # Report progress
+                if progress_reporter.should_report(processed, total_pairs):
+                    message = progress_reporter.format_progress(processed, total_pairs, unit="pairs")
+                    logger.info(message)
                 
                 # Skip if same file and same type
                 if (unit1.file_path == unit2.file_path and 
@@ -1071,3 +1097,120 @@ class ASTSimHashDetector:
                         graph[similar_record.code_hash].append((record1.code_hash, similarity))
         
         return graph
+    
+    def _find_top_percent_duplicates(self, top_percent: float, use_fast_mode: bool = True, include_trivial: bool = False, silent: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
+        """
+        Find top N% of duplicates by dynamically adjusting threshold.
+        
+        Args:
+            top_percent: Percentage of duplicates to capture (e.g., 5.0 for top 5%)
+            use_fast_mode: Use SimHash for pre-filtering
+            include_trivial: Include trivial duplicates
+            silent: Suppress progress messages
+            
+        Returns:
+            List of top N% duplicate pairs sorted by similarity
+        """
+        if not silent:
+            print(f"🎯 Finding top {top_percent}% of duplicates using dynamic threshold adjustment")
+        
+        records = list(self.records.values())
+        
+        # If not enough records, return empty
+        if len(records) < 2:
+            return []
+        
+        # Calculate total possible pairs (n choose 2)
+        total_pairs = len(records) * (len(records) - 1) // 2
+        target_count = max(1, int(total_pairs * top_percent / 100))
+        
+        if not silent:
+            print(f"   Total possible pairs: {total_pairs:,}")
+            print(f"   Target duplicate count: {target_count:,}")
+        
+        # Start with low threshold and collect all similarities
+        if not silent:
+            print(f"   📊 Computing all similarity scores...")
+        
+        all_similarities = []
+        
+        # Filter records using unified code filter utility
+        self.code_filter.include_trivial = include_trivial
+        filtered_records = [r for r in records if not self.code_filter.should_exclude_record(r)]
+        
+        if not silent:
+            if include_trivial:
+                print(f"   Using all records: {len(filtered_records):,}")
+            else:
+                print(f"   Filtered records: {len(filtered_records):,} out of {len(records):,} total")
+        
+        # Compute similarities for all pairs
+        total_comparisons = len(filtered_records) * (len(filtered_records) - 1) // 2
+        comparisons_done = 0
+        
+        # Create progress reporter for similarity computation
+        progress_reporter = ProgressReporter(
+            interval_seconds=5.0,
+            min_items_for_display=10000,
+            silent=silent
+        )
+        
+        if not silent:
+            print(f"   Expected comparisons: {total_comparisons:,}")
+            print(f"   Available code_units: {len(self.code_units):,}")
+        
+        # Early exit if not enough records
+        if len(filtered_records) < 2:
+            if not silent:
+                print(f"   ⚠️ Not enough records for comparison (need at least 2, have {len(filtered_records)})")
+            return []
+        
+        for i, record1 in enumerate(filtered_records):
+            for j, record2 in enumerate(filtered_records[i + 1:], i + 1):
+                try:
+                    # Get code units
+                    unit1 = self.code_units.get(record1.code_hash)
+                    unit2 = self.code_units.get(record2.code_hash)
+                    
+                    if unit1 is None or unit2 is None:
+                        continue
+                    
+                    # Calculate similarity
+                    if use_fast_mode:
+                        # Use SimHash from records for fast comparison
+                        if record1.simhash is not None and record2.simhash is not None:
+                            hamming_distance = bin(record1.simhash ^ record2.simhash).count('1')
+                            max_distance = 64  # SimHash bit length
+                            similarity = 1.0 - (hamming_distance / max_distance)
+                        else:
+                            # Fallback to structural analysis if simhash not available
+                            similarity = self.analyzer.calculate_structural_similarity(unit1, unit2)
+                    else:
+                        # Use full structural analysis
+                        similarity = self.analyzer.calculate_structural_similarity(unit1, unit2)
+                    
+                    all_similarities.append((record1, record2, similarity))
+                    
+                    comparisons_done += 1
+                    
+                    # Progress update
+                    progress_reporter.print_progress(comparisons_done, total_comparisons, unit="comparisons", show_rate=True)
+                
+                except Exception as e:
+                    # Skip on error
+                    continue
+        
+        if not silent:
+            print(f"   ✅ Computed {len(all_similarities):,} similarity scores")
+        
+        # Sort by similarity (highest first) and take top N%
+        all_similarities.sort(key=lambda x: x[2], reverse=True)
+        top_duplicates = all_similarities[:target_count]
+        
+        if top_duplicates:
+            dynamic_threshold = top_duplicates[-1][2]  # Threshold of the lowest similarity in top N%
+            if not silent:
+                print(f"   🎯 Dynamic threshold: {dynamic_threshold:.3f}")
+                print(f"   📊 Similarity range: {top_duplicates[-1][2]:.3f} - {top_duplicates[0][2]:.3f}")
+        
+        return top_duplicates

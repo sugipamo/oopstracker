@@ -324,8 +324,13 @@ class ASTAnalyzer:
             
             return self.parse_code(source_code, file_path)
         
-        except Exception as e:
-            print(f"❌ Error parsing file {file_path}: {e}")
+        except (FileNotFoundError, PermissionError, UnicodeDecodeError) as e:
+            # These are expected errors that we can handle gracefully
+            print(f"❌ Error reading file {file_path}: {e}")
+            return []
+        except SyntaxError as e:
+            # Python syntax errors in the file being analyzed
+            print(f"⚠️  Syntax error in {file_path}: {e}")
             return []
     
     def parse_code(self, source_code: str, file_path: Optional[str] = None) -> List[CodeUnit]:
@@ -368,8 +373,10 @@ class ASTAnalyzer:
         try:
             tree = ast.parse(source_code)
             extractor.visit(tree)
-        except:
-            pass
+        except SyntaxError as e:
+            print(f"Warning: Syntax error in source code: {e}")
+        except Exception as e:
+            print(f"Warning: Failed to parse AST: {e}")
         
         return CodeUnit(
             name=Path(file_path).stem if file_path else "module",

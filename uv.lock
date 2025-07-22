@@ -225,6 +225,11 @@ wheels = [
 ]
 
 [[package]]
+name = "evocraft-errors"
+version = "0.1.0"
+source = { editable = "../../../../util/evocraft-errors" }
+
+[[package]]
 name = "evocraft-logging"
 version = "0.1.0"
 source = { directory = "../../../../util/logging/evocraft-logging" }
@@ -725,6 +730,7 @@ dependencies = [
     { name = "intent-unified" },
     { name = "llm-providers" },
     { name = "numpy" },
+    { name = "pattern-intent" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -799,6 +805,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
+    { name = "pattern-intent", directory = "../../pattern-intent" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'all'", specifier = ">=7.0.0" },
@@ -846,6 +853,32 @@ sdist = { url = "https://files.pythonhosted.org/packages/ca/bc/f35b8446f4531a7cb
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/20/ff623b09d963f88bfde16306a54e12ee5ea43e9b597108672ff3a408aad6/pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08", size = 31191, upload-time = "2023-12-10T22:30:43.14Z" },
 ]
+
+[[package]]
+name = "pattern-intent"
+version = "0.1.0"
+source = { directory = "../../pattern-intent" }
+dependencies = [
+    { name = "evocraft-errors" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "tenacity" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
+    { name = "evocraft-errors", editable = "../../../../util/evocraft-errors" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "tenacity", specifier = ">=8.2.0" },
+]
+provides-extras = ["dev", "integration"]
 
 [[package]]
 name = "pip-licenses"

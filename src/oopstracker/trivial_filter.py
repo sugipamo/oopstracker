@@ -33,9 +33,33 @@ class TrivialFilterConfig:
     def __post_init__(self):
         if self.special_methods is None:
             self.special_methods = {
-                '__str__', '__repr__', '__eq__', '__hash__', '__bool__',
-                '__len__', '__iter__', '__next__', '__getitem__', '__setitem__',
-                '__contains__', '__enter__', '__exit__'
+                # Core lifecycle methods
+                '__init__', '__new__', '__del__',
+                
+                # String representation methods
+                '__str__', '__repr__', '__format__',
+                
+                # Comparison methods
+                '__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__',
+                
+                # Type conversion methods
+                '__bool__', '__int__', '__float__', '__complex__', '__bytes__',
+                
+                # Container methods
+                '__len__', '__iter__', '__next__', '__reversed__',
+                '__getitem__', '__setitem__', '__delitem__', '__contains__',
+                
+                # Context manager methods
+                '__enter__', '__exit__',
+                
+                # Attribute access methods
+                '__getattr__', '__setattr__', '__delattr__', '__getattribute__',
+                
+                # Callable and descriptor methods
+                '__call__', '__get__', '__set__', '__delete__',
+                
+                # Copy methods
+                '__copy__', '__deepcopy__'
             }
         
         if self.converter_methods is None:
@@ -224,8 +248,9 @@ class TrivialPatternFilter:
     Filters out trivial code patterns that are commonly duplicated but acceptable.
     """
     
-    def __init__(self, config: Optional[TrivialFilterConfig] = None):
+    def __init__(self, config: Optional[TrivialFilterConfig] = None, include_tests: bool = False):
         self.config = config or TrivialFilterConfig()
+        self.include_tests = include_tests
         self.analyzer = TrivialPatternAnalyzer()
     
     def should_exclude_code_record(self, record: CodeRecord) -> bool:
@@ -240,6 +265,11 @@ class TrivialPatternFilter:
         """
         if not record.code_content:
             return True
+        
+        # Check if this is a test function by name (if tests not included)
+        if not self.include_tests and record.function_name:
+            if self._is_test_function_name(record.function_name):
+                return True
         
         try:
             tree = ast.parse(record.code_content)
@@ -259,8 +289,38 @@ class TrivialPatternFilter:
             # If we can't parse it, don't exclude it
             return False
     
+    def _is_test_function_name(self, function_name: str) -> bool:
+        """Check if a function name indicates it's a test function."""
+        if not function_name:
+            return False
+            
+        # Check for common test function patterns
+        test_patterns = [
+            'test_',           # test_something
+            '_test',           # something_test  
+            'Test',            # TestSomething (class names)
+            'unittest',        # unittest methods
+            'should_',         # should_do_something (BDD style)
+        ]
+        
+        function_lower = function_name.lower()
+        
+        # Check basic patterns
+        if any(pattern.lower() in function_lower for pattern in test_patterns):
+            return True
+            
+        # Check BDD style patterns more precisely to avoid __init__ false positives
+        if function_lower.startswith('it_'):  # it_should_do_something (must start with it_)
+            return True
+            
+        return False
+    
     def _should_exclude_function(self, node: ast.FunctionDef) -> bool:
         """Check if a function should be excluded."""
+        # Check if this is a test function (if tests not included)
+        if not self.include_tests and self._is_test_function_name(node.name):
+            return True
+            
         analysis = self.analyzer.analyze_function(node)
         
         # Level 1 filters (always applied)
@@ -325,11 +385,16 @@ class TrivialPatternFilter:
     
     def _is_simple_special_method(self, analysis: dict) -> bool:
         """Check if this is a simple special method."""
-        return (
-            analysis['is_special_method'] and 
-            analysis['name'] in self.config.special_methods and
-            analysis['statement_count'] <= 1
-        )
+        if not (analysis['is_special_method'] and analysis['name'] in self.config.special_methods):
+            return False
+            
+        # __init__ methods are often more complex but still commonly trivial
+        if analysis['name'] == '__init__':
+            # Allow up to 10 statements for __init__ (typically assignment statements)
+            return analysis['statement_count'] <= 10
+        
+        # Other special methods should be simple
+        return analysis['statement_count'] <= 3
     
     def _is_simple_property(self, analysis: dict) -> bool:
         """Check if this is a simple property getter/setter."""

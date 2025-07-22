@@ -6,7 +6,7 @@ import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 
 @dataclass
@@ -136,3 +136,45 @@ class DatabaseConfig:
             "backup_interval": self.backup_interval,
             "max_records": self.max_records,
         }
+
+
+@dataclass
+class AnalysisResult:
+    """Base class for all analysis results."""
+    success: bool
+    result: Any
+    confidence: float
+    reasoning: str
+    metadata: Dict[str, Any]
+    processing_time: float
+
+
+@dataclass
+class ClassificationResult:
+    """Result of function classification analysis."""
+    category: str
+    confidence: float
+    reasoning: str
+    matched_rules: List[str]
+    processing_time: float
+
+
+@dataclass
+class SemanticAnalysisResult:
+    """Result of semantic analysis operations."""
+    code_record_1: 'CodeRecord'
+    code_record_2: 'CodeRecord'
+    semantic_similarity: float
+    confidence: float
+    analysis_method: str
+    reasoning: str
+    processing_time: float
+
+
+def brand_new_learning_function():
+    """Test function for intent_tree learning"""
+    data = [1, 2, 3, 4, 5]
+    total = sum(data)
+    average = total / len(data)
+    return {"total": total, "average": average}
+
