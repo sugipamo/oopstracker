@@ -17,7 +17,8 @@ from .ast_database import ASTDatabaseManager
 from .trivial_filter import TrivialPatternFilter, TrivialFilterConfig
 from .progress_reporter import ProgressReporter
 from .code_filter_utility import CodeFilterUtility
-from .detectors import SimilarityDetector, SimilarityGraphBuilder, DetectorCacheManager
+from .detectors import (SimilarityDetector, SimilarityGraphBuilder, DetectorCacheManager,
+                        AdaptiveThresholdFinder, StatisticsCollector, TopPercentDuplicateFinder)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,9 @@ class ASTSimHashDetectorRefactored:
     - SimilarityGraphBuilder: Graph construction
     - DetectorCacheManager: Caching mechanism
     - ASTDatabaseManager: Data persistence
+    - AdaptiveThresholdFinder: Dynamic threshold adjustment
+    - StatisticsCollector: Code statistics collection
+    - TopPercentDuplicateFinder: Top N% duplicate finding
     """
     
     def __init__(self, hamming_threshold: int = 10, db_path: str = "oopstracker_ast.db", include_tests: bool = False):
@@ -61,6 +65,9 @@ class ASTSimHashDetectorRefactored:
         self.similarity_detector = SimilarityDetector(self.analyzer, self.code_filter)
         self.graph_builder = SimilarityGraphBuilder(self.analyzer)
         self.cache_manager = DetectorCacheManager()
+        self.adaptive_threshold_finder = AdaptiveThresholdFinder(self.graph_builder)
+        self.statistics_collector = StatisticsCollector()
+        self.top_percent_finder = TopPercentDuplicateFinder(self.similarity_detector, self.hamming_threshold)
         
         # Load existing data
         self._load_existing_data()
@@ -382,70 +389,12 @@ class ASTSimHashDetectorRefactored:
         Returns:
             Tuple of (graph, selected_threshold)
         """
-        logger.info(f"Building adaptive similarity graph targeting {target_connections} connections")
-        
-        # Binary search for optimal threshold
-        low, high = min_threshold, max_threshold
-        best_graph = {}
-        best_threshold = (low + high) / 2
-        best_diff = float('inf')
-        
-        # First, try with a small sample to estimate
-        all_records = list(self.records.values())
-        sample_size = min(100, len(all_records))
-        
-        if sample_size < 10:
-            # Too few records, just use middle threshold
-            logger.warning(f"Too few records ({len(all_records)}) for adaptive threshold")
-            graph = self.build_similarity_graph(best_threshold, use_fast_mode)
-            return graph, best_threshold
-        
-        sample_records = random.sample(all_records, sample_size)
-        
-        iterations = 0
-        max_iterations = 10
-        
-        while low <= high and iterations < max_iterations:
-            iterations += 1
-            mid_threshold = (low + high) / 2
-            
-            # Build sample graph
-            sample_graph = self.graph_builder.build_sample_graph(
-                sample_records, self.code_units, mid_threshold
-            )
-            
-            # Estimate total connections
-            sample_connections = sum(len(edges) for edges in sample_graph.values())
-            estimated_total = sample_connections * (len(all_records) / sample_size) ** 2
-            
-            logger.info(f"Iteration {iterations}: threshold={mid_threshold:.3f}, "
-                        f"sample_connections={sample_connections}, "
-                        f"estimated_total={estimated_total:.0f}")
-            
-            diff = abs(estimated_total - target_connections)
-            
-            if diff < best_diff:
-                best_diff = diff
-                best_threshold = mid_threshold
-            
-            if estimated_total < target_connections * 0.9:
-                # Need more connections, lower threshold
-                high = mid_threshold - 0.01
-            elif estimated_total > max_connections:
-                # Too many connections, raise threshold
-                low = mid_threshold + 0.01
-            else:
-                # Close enough
-                break
-        
-        # Build final graph with selected threshold
-        logger.info(f"Selected threshold: {best_threshold:.3f}")
-        best_graph = self.build_similarity_graph(best_threshold, use_fast_mode)
-        
-        actual_connections = sum(len(edges) for edges in best_graph.values())
-        logger.info(f"Final graph: {len(best_graph)} nodes, {actual_connections} connections")
-        
-        return best_graph, best_threshold
+        records = list(self.records.values())
+        return self.adaptive_threshold_finder.find_adaptive_threshold(
+            records, self.code_units, self.bk_tree,
+            target_connections, max_connections,
+            min_threshold, max_threshold, use_fast_mode
+        )
     
     def _find_top_percent_duplicates(self, top_percent: float, use_fast_mode: bool = True, 
                                      include_trivial: bool = False, silent: bool = False) -> List[Tuple[CodeRecord, CodeRecord, float]]:
@@ -461,76 +410,17 @@ class ASTSimHashDetectorRefactored:
         Returns:
             List of (record1, record2, similarity_score) tuples
         """
-        if not 0.0 < top_percent <= 100.0:
-            raise ValueError("top_percent must be between 0.0 and 100.0")
-        
-        # Calculate target number of pairs
-        n_records = len(self.records)
-        max_pairs = n_records * (n_records - 1) // 2
-        target_pairs = int(max_pairs * (top_percent / 100.0))
-        
-        logger.info(f"Finding top {top_percent}% duplicates (targeting {target_pairs} pairs from {max_pairs} possible)")
-        
-        # Start with a high threshold and gradually lower it
-        threshold = 0.95
-        min_threshold = 0.3
-        step = 0.05
-        
-        best_duplicates = []
-        
-        while threshold >= min_threshold:
-            duplicates = self.find_potential_duplicates(
-                threshold=threshold,
-                use_fast_mode=use_fast_mode,
-                use_cache=False,  # Don't cache intermediate results
-                include_trivial=include_trivial,
-                silent=silent
-            )
-            
-            logger.info(f"Threshold {threshold:.2f}: found {len(duplicates)} duplicates")
-            
-            if len(duplicates) >= target_pairs:
-                # Found enough, trim to exact number
-                duplicates.sort(key=lambda x: x[2], reverse=True)
-                best_duplicates = duplicates[:target_pairs]
-                break
-            
-            best_duplicates = duplicates
-            threshold -= step
-        
-        logger.info(f"Returning {len(best_duplicates)} duplicates (target was {target_pairs})")
-        return best_duplicates
+        records = list(self.records.values())
+        return self.top_percent_finder.find_top_percent(
+            records, self.code_units, self.bk_tree,
+            top_percent, use_fast_mode, include_trivial, silent
+        )
     
     def get_statistics(self) -> Dict:
         """Get statistics about registered code."""
-        if not self.records:
-            return {
-                "total_units": 0,
-                "files": 0,
-                "functions": 0,
-                "classes": 0,
-                "modules": 0,
-                "hamming_threshold": self.hamming_threshold,
-                "memory_loaded": 0
-            }
-        
-        # Count by type
-        function_count = sum(1 for r in self.records.values() if r.code_type == "function")
-        class_count = sum(1 for r in self.records.values() if r.code_type == "class")
-        module_count = sum(1 for r in self.records.values() if r.code_type == "module")
-        
-        # Get unique files
-        files = {r.file_path for r in self.records.values() if r.file_path}
-        
-        return {
-            "total_units": len(self.records),
-            "files": len(files),
-            "functions": function_count,
-            "classes": class_count,
-            "modules": module_count,
-            "hamming_threshold": self.hamming_threshold,
-            "memory_loaded": len(self.records)
-        }
+        return self.statistics_collector.collect_statistics(
+            self.records, self.hamming_threshold
+        )
     
     def clear_memory(self):
         """Clear all stored data."""
