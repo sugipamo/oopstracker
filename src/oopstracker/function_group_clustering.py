@@ -9,44 +9,13 @@ import re
 import logging
 import asyncio
 from typing import List, Dict, Tuple, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
 from collections import defaultdict
 
 from .models import CodeRecord
 from .function_taxonomy_expert import FunctionTaxonomyExpert
 from .ai_analysis_coordinator import get_ai_coordinator
+from .clustering_models import FunctionGroup, ClusterSplitResult, ClusteringStrategy
 # Removed circular import - will use lazy import
-
-
-@dataclass
-class FunctionGroup:
-    """Represents a group of functionally related functions."""
-    group_id: str
-    functions: List[Dict[str, Any]]
-    label: str
-    confidence: float
-    split_patterns: Optional[Tuple[str, str]] = None
-    metadata: Dict[str, Any] = None
-
-
-@dataclass
-class ClusterSplitResult:
-    """Result of splitting a cluster using regex patterns."""
-    original_cluster_id: str
-    group_a: FunctionGroup
-    group_b: FunctionGroup
-    unmatched: List[Dict[str, Any]]
-    split_patterns: Tuple[str, str]
-    evaluation_scores: Tuple[float, float]
-
-
-class ClusteringStrategy(Enum):
-    """Available clustering strategies."""
-    SEMANTIC_SIMILARITY = "semantic_similarity"
-    CATEGORY_BASED = "category_based"
-    REGEX_PATTERN = "regex_pattern"
-    HYBRID = "hybrid"
 
 
 class FunctionGroupClusteringSystem:
@@ -524,62 +493,3 @@ class FunctionGroupClusteringSystem:
         return insights
 
 
-async def demo_function_clustering():
-    """Demo the function group clustering system."""
-    print("🔬 Function Group Clustering System Demo")
-    print("=" * 50)
-    
-    # Initialize system
-    clustering_system = FunctionGroupClusteringSystem(enable_ai=True)
-    
-    # Mock function data
-    mock_functions = [
-        {'name': 'get_user_data', 'code': 'def get_user_data(): return user_db.fetch()', 'file_path': 'users.py'},
-        {'name': 'set_user_name', 'code': 'def set_user_name(name): user.name = name', 'file_path': 'users.py'},
-        {'name': 'validate_email', 'code': 'def validate_email(email): return "@" in email', 'file_path': 'validation.py'},
-        {'name': 'fetch_profile', 'code': 'def fetch_profile(): return profile_db.get()', 'file_path': 'profile.py'},
-        {'name': 'update_settings', 'code': 'def update_settings(settings): config.update(settings)', 'file_path': 'config.py'},
-        {'name': 'check_password', 'code': 'def check_password(pwd): return len(pwd) > 8', 'file_path': 'validation.py'},
-    ]
-    
-    # Test clustering
-    print("📊 Creating function clusters...")
-    clusters = await clustering_system.get_current_function_clusters(mock_functions, ClusteringStrategy.CATEGORY_BASED)
-    
-    for cluster in clusters:
-        print(f"\n🏷️  Cluster: {cluster.label}")
-        print(f"   Functions: {len(cluster.functions)}")
-        print(f"   Confidence: {cluster.confidence:.2f}")
-        for func in cluster.functions:
-            print(f"   - {func['name']} ({func.get('category', 'unknown')})")
-    
-    # Test splitting
-    if clusters:
-        large_cluster = max(clusters, key=lambda c: len(c.functions))
-        if len(large_cluster.functions) >= 2:
-            print(f"\n✂️  Splitting cluster: {large_cluster.label}")
-            
-            split_result = await clustering_system.split_cluster_by_regex(
-                large_cluster,
-                pattern_a=r'get_|fetch_',
-                pattern_b=r'set_|update_',
-                label_a="Data Retrieval",
-                label_b="Data Modification"
-            )
-            
-            print(f"   Group A ({split_result.group_a.label}): {len(split_result.group_a.functions)} functions")
-            print(f"   Group B ({split_result.group_b.label}): {len(split_result.group_b.functions)} functions")
-            print(f"   Unmatched: {len(split_result.unmatched)} functions")
-            print(f"   Evaluation scores: {split_result.evaluation_scores}")
-    
-    # Show insights
-    print(f"\n📈 Clustering Insights:")
-    insights = clustering_system.get_clustering_insights()
-    summary = insights['clustering_summary']
-    print(f"   Total clusters: {summary['total_clusters']}")
-    print(f"   Total functions: {summary['total_functions']}")
-    print(f"   Average cluster size: {summary['average_cluster_size']:.1f}")
-
-
-if __name__ == "__main__":
-    asyncio.run(demo_function_clustering())
