@@ -9,7 +9,11 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 # Import from existing modules - centralize their usage
-from .core import CodeMemory
+# CodeMemory is in core.py file, not in core package
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from core import CodeMemory
 from .models import SimilarityResult
 from .ast_simhash_detector import ASTSimHashDetector
 from .ignore_patterns import IgnorePatterns

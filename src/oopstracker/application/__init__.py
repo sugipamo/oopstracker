@@ -7,17 +7,9 @@ REFACTORED: Enhanced with Layer pattern implementation.
 from .code_analysis_service import CodeAnalysisService
 from .oopstracker_facade import OOPSTrackerFacade, create_oopstracker
 
-# Legacy components (maintained for compatibility)
-from .analysis_orchestrator import AnalysisOrchestrator
-from .configuration_manager import ConfigurationManager
-
 __all__ = [
     # New layered architecture (recommended)
     "CodeAnalysisService",
     "OOPSTrackerFacade",
     "create_oopstracker",
-    
-    # Legacy components (backward compatibility)
-    "AnalysisOrchestrator",
-    "ConfigurationManager",
 ]

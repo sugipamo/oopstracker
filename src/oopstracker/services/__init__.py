@@ -14,6 +14,10 @@ from .configuration_service import (
     get_config_service,
     reset_config_service
 )
+from .file_scan_service import FileScanService
+from .duplicate_detection_service import DuplicateDetectionService
+from .classification_service import ClassificationService
+from .clustering_service import ClusteringService
 
 __all__ = [
     "CodeNormalizationService",
@@ -24,5 +28,9 @@ __all__ = [
     "AnalysisConfig",
     "DetectionMethod",
     "get_config_service",
-    "reset_config_service"
+    "reset_config_service",
+    "FileScanService",
+    "DuplicateDetectionService",
+    "ClassificationService",
+    "ClusteringService"
 ]
