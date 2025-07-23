@@ -26,7 +26,7 @@ class CheckCommand(BaseCommand):
     def add_arguments(cls, parser: argparse.ArgumentParser):
         """Add command-specific arguments."""
         parser.add_argument(
-            "path",
+            "code",
             nargs="?",
             default=".",
             help="Directory or file to analyze (default: current directory)"
@@ -56,9 +56,9 @@ class CheckCommand(BaseCommand):
         analysis_service = RefactoredAnalysisService(repository, detector)
         
         # Find Python files
-        files = self._find_python_files(args.path)
+        files = self._find_python_files(args.code)
         if not files:
-            print(f"❌ No Python files found in {args.path}")
+            print(f"❌ No Python files found in {args.code}")
             return 1
         
         print(f"🔍 Analyzing {len(files)} Python files...")

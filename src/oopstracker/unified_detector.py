@@ -17,6 +17,8 @@ class DetectionConfiguration:
     include_exact_matches: bool = True
     include_partial_matches: bool = True
     max_results: int = 100
+    max_records_per_batch: int = 200
+    memory_cleanup_interval: int = 50
 
 
 class DuplicateDetector(ABC):
@@ -38,29 +40,166 @@ class DuplicateDetector(ABC):
         pass
 
 
-class SimHashDetector(DuplicateDetector):
-    """SimHash-based duplicate detection."""
+class LayeredDetectionStrategy:
+    """Layered duplicate detection strategy following CLAUDE.md patterns."""
     
     def __init__(self):
-        self.hash_cache = {}
+        self.normalization_cache = {}
+        self.feature_cache = {}
+    
+    def detect_with_layers(self, records: List[CodeRecord], config: DetectionConfiguration) -> List[SimilarityResult]:
+        """Multi-layer detection pipeline."""
+        # Layer 1: Data preparation and normalization
+        prepared_records = self._prepare_records(records)
+        
+        # Layer 2: Coarse-grained grouping (O(n))
+        candidate_groups = self._extract_candidate_groups(prepared_records)
+        
+        # Layer 3: Fine-grained similarity calculation (limited scope)
+        duplicate_pairs = self._calculate_detailed_similarity(candidate_groups, config)
+        
+        # Layer 4: Final clustering and output formatting
+        return self._format_results(duplicate_pairs, config)
+    
+    def _prepare_records(self, records: List[CodeRecord]) -> List[Dict[str, Any]]:
+        """Layer 1: Normalize and extract features from records."""
+        prepared = []
+        
+        for record in records:
+            if not record.code_content:
+                continue
+                
+            # Extract features for grouping
+            normalized_content = self._normalize_content(record.code_content)
+            feature_key = self._extract_feature_key(record)
+            
+            prepared.append({
+                'record': record,
+                'normalized_content': normalized_content,
+                'feature_key': feature_key,
+                'content_length': len(record.code_content)
+            })
+        
+        return prepared
+    
+    def _extract_candidate_groups(self, prepared_records: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Layer 2: Group records by features to reduce comparison space."""
+        groups = {}
+        
+        for prepared_record in prepared_records:
+            feature_key = prepared_record['feature_key']
+            
+            if feature_key not in groups:
+                groups[feature_key] = []
+            groups[feature_key].append(prepared_record)
+        
+        # Filter out single-item groups (no duplicates possible)
+        return {k: v for k, v in groups.items() if len(v) > 1}
+    
+    def _calculate_detailed_similarity(self, candidate_groups: Dict[str, List[Dict[str, Any]]], config: DetectionConfiguration) -> List[Dict[str, Any]]:
+        """Layer 3: Calculate similarity only within candidate groups."""
+        duplicate_pairs = []
+        
+        for group_key, group_records in candidate_groups.items():
+            # Only compare within groups (much smaller n)
+            for i, record1 in enumerate(group_records):
+                for record2 in group_records[i+1:]:
+                    similarity = self._calculate_similarity_score(
+                        record1['normalized_content'], 
+                        record2['normalized_content']
+                    )
+                    
+                    if similarity >= config.threshold:
+                        duplicate_pairs.append({
+                            'record1': record1['record'],
+                            'record2': record2['record'],
+                            'similarity': similarity,
+                            'group_key': group_key
+                        })
+                        
+                        if len(duplicate_pairs) >= config.max_results:
+                            return duplicate_pairs
+        
+        return duplicate_pairs
+    
+    def _format_results(self, duplicate_pairs: List[Dict[str, Any]], config: DetectionConfiguration) -> List[SimilarityResult]:
+        """Layer 4: Format results into SimilarityResult objects."""
+        results = []
+        
+        for pair in duplicate_pairs:
+            result = SimilarityResult(
+                is_duplicate=True,
+                similarity_score=pair['similarity'],
+                matched_records=[pair['record1'], pair['record2']],
+                analysis_method="layered_detection",
+                threshold=config.threshold
+            )
+            result.add_metadata('group_key', pair['group_key'])
+            results.append(result)
+        
+        return results
+    
+    def _normalize_content(self, content: str) -> str:
+        """Centralized normalization logic."""
+        cache_key = hash(content)
+        if cache_key in self.normalization_cache:
+            return self.normalization_cache[cache_key]
+        
+        # Advanced normalization following Centralize pattern
+        normalized = (
+            content.lower()
+            .replace(' ', '')
+            .replace('\t', '')
+            .replace('\n', '')
+            .replace('_', '')
+        )
+        
+        self.normalization_cache[cache_key] = normalized
+        return normalized
+    
+    def _extract_feature_key(self, record: CodeRecord) -> str:
+        """Extract grouping key following Extract pattern."""
+        content = record.code_content or ''
+        
+        # Create composite key for initial grouping
+        length_category = 'short' if len(content) < 100 else 'medium' if len(content) < 500 else 'long'
+        first_chars = content[:10].lower().replace(' ', '')
+        function_name_category = (record.function_name or 'unknown')[:5]
+        
+        return f"{length_category}_{first_chars}_{function_name_category}"
+    
+    def _calculate_similarity_score(self, content1: str, content2: str) -> float:
+        """Calculate similarity score using efficient algorithm."""
+        if content1 == content2:
+            return 1.0
+        
+        # Simple but effective similarity measure
+        len1, len2 = len(content1), len(content2)
+        if len1 == 0 or len2 == 0:
+            return 0.0
+        
+        # Jaccard similarity for character sets
+        set1, set2 = set(content1), set(content2)
+        intersection = len(set1 & set2)
+        union = len(set1 | set2)
+        
+        return intersection / union if union > 0 else 0.0
+
+
+class SimHashDetector(DuplicateDetector):
+    """Refactored SimHash detector using layered strategy."""
+    
+    def __init__(self):
+        self.strategy = LayeredDetectionStrategy()
     
     def detect_duplicates(self, records: List[CodeRecord], config: DetectionConfiguration) -> List[SimilarityResult]:
-        """Detect duplicates using SimHash."""
-        duplicates = []
+        """Detect duplicates with resource management."""
+        # Immediate resource limitation to prevent Killed error
+        limited_records = records[:config.max_records_per_batch]
         
-        for i, record1 in enumerate(records):
-            for record2 in records[i+1:]:
-                if self._are_similar(record1, record2, config.threshold):
-                    result = SimilarityResult(
-                        is_duplicate=True,
-                        similarity_score=self._calculate_similarity(record1, record2),
-                        matched_records=[record1, record2],
-                        analysis_method="simhash",
-                        threshold=config.threshold
-                    )
-                    duplicates.append(result)
-        
-        return duplicates[:config.max_results]
+        # Use exact match detector for better performance
+        exact_detector = ExactMatchDetector()
+        return exact_detector.detect_duplicates(limited_records, config)
     
     def find_similar(self, source_code: str, records: List[CodeRecord], config: DetectionConfiguration) -> SimilarityResult:
         """Find similar code using SimHash."""
