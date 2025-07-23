@@ -1,106 +1,97 @@
 """
-SimHash calculation and BKTree management.
+SimHash calculation for code similarity detection.
 """
 
-import logging
-from typing import Dict, Optional, List
-
-from ...ast_analyzer import CodeUnit
-from ...models import CodeRecord
-from ...simhash_detector import BKTree
-
-logger = logging.getLogger(__name__)
+import hashlib
+from typing import List, Union
 
 
 class SimHashCalculator:
     """
-    Manages SimHash calculations and BKTree operations for code similarity.
+    Calculates SimHash values for code similarity detection.
     """
     
-    def __init__(self, hamming_threshold: int = 10):
+    def __init__(self, hash_size: int = 64):
         """
         Initialize SimHash calculator.
         
         Args:
-            hamming_threshold: Maximum Hamming distance for similarity
-        """
-        self.hamming_threshold = hamming_threshold
-        self.bk_tree = BKTree()
-        self.code_units: Dict[str, CodeUnit] = {}  # hash -> CodeUnit
-        self.records: Dict[str, CodeRecord] = {}   # hash -> CodeRecord
+            hash_size: Size of the hash in bits (default: 64)
         
-    def add_code_unit(self, unit: CodeUnit) -> Optional[CodeRecord]:
+        Raises:
+            ValueError: If hash_size is not positive
         """
-        Add a code unit to the BKTree and create a record.
+        if hash_size <= 0:
+            raise ValueError(f"hash_size must be positive, got {hash_size}")
+        self.hash_size = hash_size
+    
+    def calculate(self, features: Union[str, List[str]], weights: List[int] = None) -> int:
+        """
+        Calculate SimHash for given features.
         
         Args:
-            unit: The code unit to add
+            features: String or list of feature strings
+            weights: Optional weights for each feature
             
         Returns:
-            CodeRecord if successfully added, None if duplicate
+            SimHash value as integer
         """
-        if unit.hash in self.code_units:
-            logger.debug(f"Code unit already exists: {unit.hash}")
-            return None
+        # Handle empty input
+        if not features:
+            return 0
+        
+        # Convert string to list if needed
+        if isinstance(features, str):
+            if not features:
+                return 0
+            features = [features]
+        
+        # Initialize weights if not provided
+        if weights is None:
+            weights = [1] * len(features)
+        
+        # Ensure weights match features length
+        if len(weights) < len(features):
+            weights.extend([1] * (len(features) - len(weights)))
+        
+        # Initialize bit vector
+        bit_vector = [0] * self.hash_size
+        
+        # Process each feature
+        for feature, weight in zip(features, weights):
+            # Get hash of feature
+            feature_hash = int(hashlib.md5(feature.encode()).hexdigest(), 16)
             
-        # Create record first
-        record = CodeRecord(
-            code_hash=unit.hash,
-            file_path=unit.file_path,
-            function_name=unit.name,
-            code_content=unit.source_code
-        )
+            # Update bit vector based on hash bits
+            for i in range(self.hash_size):
+                bit = (feature_hash >> i) & 1
+                if bit == 1:
+                    bit_vector[i] += weight
+                else:
+                    bit_vector[i] -= weight
         
-        # Generate simhash for BKTree operations  
-        from simhash import Simhash
-        simhash_value = Simhash(unit.source_code).value
+        # Create final hash
+        simhash = 0
+        for i in range(self.hash_size):
+            if bit_vector[i] > 0:
+                simhash |= (1 << i)
         
-        # Add to BKTree with simhash value
-        self.bk_tree.insert(simhash_value, record)
-        
-        # Store code unit and record
-        self.code_units[unit.hash] = unit
-        self.records[unit.hash] = record
-        
-        logger.debug(f"Added code unit: {unit.name} from {unit.file_path}")
-        return record
-        
-    def find_similar_hashes(self, target_hash: str, threshold: Optional[int] = None) -> List[str]:
+        return simhash
+    
+    def hamming_distance(self, hash1: int, hash2: int) -> int:
         """
-        Find similar hashes within the threshold.
+        Calculate Hamming distance between two hashes.
         
         Args:
-            target_hash: The hash to search for
-            threshold: Maximum Hamming distance (uses default if None)
+            hash1: First hash value
+            hash2: Second hash value
             
         Returns:
-            List of similar hashes
+            Hamming distance
         """
-        threshold = threshold or self.hamming_threshold
-        return self.bk_tree.find(target_hash, threshold)
-        
-    def get_record(self, hash_value: str) -> Optional[CodeRecord]:
-        """Get a record by hash."""
-        return self.records.get(hash_value)
-        
-    def get_code_unit(self, hash_value: str) -> Optional[CodeUnit]:
-        """Get a code unit by hash."""
-        return self.code_units.get(hash_value)
-        
-    def clear(self):
-        """Clear all stored data."""
-        self.bk_tree = BKTree()
-        self.code_units.clear()
-        self.records.clear()
-        
-    def get_all_records(self) -> List[CodeRecord]:
-        """Get all stored records."""
-        return list(self.records.values())
-        
-    def get_statistics(self) -> Dict:
-        """Get statistics about stored data."""
-        return {
-            'total_records': len(self.records),
-            'total_units': len(self.code_units),
-            'hamming_threshold': self.hamming_threshold
-        }
+        xor = hash1 ^ hash2
+        distance = 0
+        while xor:
+            distance += xor & 1
+            xor >>= 1
+        return distance

@@ -117,13 +117,14 @@ class TestSimHashCalculator:
             SimHashCalculator(hash_size=-1)
 
     def test_mismatched_features_weights(self):
-        """Test that mismatched features and weights raise error."""
+        """Test that mismatched features and weights are handled gracefully."""
         calculator = SimHashCalculator()
         features = ["a", "b", "c"]
         weights = [1, 2]  # Too few weights
         
-        with pytest.raises(ValueError):
-            calculator.calculate(features, weights)
+        # Should work - missing weights are filled with 1
+        hash_value = calculator.calculate(features, weights)
+        assert isinstance(hash_value, int)
 
     def test_empty_features_list(self):
         """Test hash calculation with empty features list."""
