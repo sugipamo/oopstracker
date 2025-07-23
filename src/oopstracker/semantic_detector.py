@@ -8,16 +8,11 @@ from enum import Enum
 
 from .models import CodeRecord
 from .intent_tree_fixed_adapter import FixedIntentTreeAdapter
-from .integrations.intent_tree_integration import IntentTreeIntegration
-from .integrations.interactive_explorer import InteractiveExplorer
-from .integrations.learning_stats_manager import LearningStatsManager
-from .result_aggregator import ResultAggregator
 from .semantic_analysis_coordinator import SemanticAnalysisCoordinator
 
 # Refactored components for better separation of concerns
-from .analyzers.structural_analyzer import StructuralAnalyzer
 from .analyzers.semantic_analyzer import SemanticAnalyzer, SemanticDuplicateResult, SemanticAnalysisStatus
-from .analyzers.result_combiner import ResultCombiner
+from .layers.initialization_layer import InitializationLayer
 
 
 class SemanticAwareDuplicateDetector:
@@ -34,19 +29,19 @@ class SemanticAwareDuplicateDetector:
         self.logger = logging.getLogger(__name__)
         self._semantic_threshold = 0.7
         
-        # Initialize refactored analyzers
-        self.structural_analyzer = StructuralAnalyzer()
+        # Use initialization layer for component setup
+        self.init_layer = InitializationLayer(intent_unified_available, enable_intent_tree)
+        components = self.init_layer.initialize_components()
         
-        # Initialize integrations
-        self.intent_tree_integration = IntentTreeIntegration(enable_intent_tree)
-        self.intent_tree_adapter = self.intent_tree_integration.intent_tree_adapter
-        self.interactive_explorer = InteractiveExplorer(self.intent_tree_adapter)
-        self.learning_stats_manager = LearningStatsManager(self.intent_tree_adapter)
-        
-        # Initialize new components
-        self.result_aggregator = ResultAggregator()
-        self.result_combiner = ResultCombiner()
-        self.semantic_coordinator = SemanticAnalysisCoordinator(intent_unified_available)
+        # Extract initialized components
+        self.structural_analyzer = components['structural_analyzer']
+        self.intent_tree_integration = components['intent_tree_integration']
+        self.intent_tree_adapter = components['intent_tree_adapter']
+        self.interactive_explorer = components['interactive_explorer']
+        self.learning_stats_manager = components['learning_stats_manager']
+        self.result_aggregator = components['result_aggregator']
+        self.result_combiner = components['result_combiner']
+        self.semantic_coordinator = components['semantic_coordinator']
         
         # Semantic analyzer with coordinator
         self.semantic_analyzer = SemanticAnalyzer(

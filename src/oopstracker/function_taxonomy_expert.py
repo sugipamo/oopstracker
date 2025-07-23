@@ -19,6 +19,7 @@ from .progress_manager import ProgressManager
 # REFACTORING: Extracted strategies for better separation of concerns
 from .taxonomy_strategies.pattern_strategy import PatternAnalysisStrategy
 from .taxonomy_strategies.structural_strategy import StructuralAnalysisStrategy
+from .taxonomy_strategies.name_analyzer import FunctionNameAnalyzer
 
 
 @dataclass
@@ -58,6 +59,7 @@ class FunctionTaxonomyExpert:
         # REFACTORING: Using extracted strategy classes instead of internal methods
         self.pattern_strategy = PatternAnalysisStrategy()
         self.structural_strategy = StructuralAnalysisStrategy()
+        self.name_analyzer = FunctionNameAnalyzer()
         
         # Domain knowledge
         self.classification_history: List[TaxonomyResult] = []
@@ -190,7 +192,7 @@ class FunctionTaxonomyExpert:
         structural_indicators = []
         
         if function_name:
-            name_analysis = self._analyze_function_name(function_name)
+            name_analysis = self.name_analyzer.analyze(function_name)
             category = name_analysis.get("suggested_category", category)
             confidence = name_analysis.get("confidence", confidence)
             structural_indicators.extend(name_analysis.get("indicators", []))
@@ -229,60 +231,6 @@ class FunctionTaxonomyExpert:
                 "has_async_operations": has_async_operations,
                 "has_error_handling": has_error_handling
             }
-        }
-    
-    def _analyze_function_name(self, function_name: str) -> Dict[str, Any]:
-        """Analyze function name for semantic clues."""
-        name_lower = function_name.lower()
-        
-        # Name pattern analysis
-        if name_lower.startswith('get_'):
-            return {
-                "suggested_category": FunctionCategory.GETTER.value,
-                "confidence": 0.8,
-                "indicators": ["getter naming pattern"]
-            }
-        elif name_lower.startswith('set_'):
-            return {
-                "suggested_category": FunctionCategory.SETTER.value,
-                "confidence": 0.8,
-                "indicators": ["setter naming pattern"]
-            }
-        elif name_lower == '__init__':
-            return {
-                "suggested_category": FunctionCategory.CONSTRUCTOR.value,
-                "confidence": 0.9,
-                "indicators": ["constructor method"]
-            }
-        elif name_lower.startswith('test_'):
-            return {
-                "suggested_category": FunctionCategory.TEST_FUNCTION.value,
-                "confidence": 0.9,
-                "indicators": ["test function pattern"]
-            }
-        elif any(word in name_lower for word in ['validate', 'check', 'verify']):
-            return {
-                "suggested_category": FunctionCategory.VALIDATION.value,
-                "confidence": 0.7,
-                "indicators": ["validation terminology"]
-            }
-        elif any(word in name_lower for word in ['convert', 'transform', 'parse', 'format']):
-            return {
-                "suggested_category": FunctionCategory.CONVERSION.value,
-                "confidence": 0.7,
-                "indicators": ["conversion terminology"]
-            }
-        elif any(word in name_lower for word in ['process', 'handle', 'manage', 'execute']):
-            return {
-                "suggested_category": FunctionCategory.BUSINESS_LOGIC.value,
-                "confidence": 0.6,
-                "indicators": ["business process terminology"]
-            }
-        
-        return {
-            "suggested_category": FunctionCategory.UNKNOWN.value,
-            "confidence": 0.3,
-            "indicators": ["no clear naming pattern"]
         }
     
     def _synthesize_expert_opinion(
