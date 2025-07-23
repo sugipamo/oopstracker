@@ -1,6 +1,6 @@
 """Main entry point for oopstracker when run as a module."""
 
-from .cli import main
+from .cli import cli_main
 
 if __name__ == "__main__":
-    main()
+    cli_main()

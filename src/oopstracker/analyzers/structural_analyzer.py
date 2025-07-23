@@ -104,3 +104,7 @@ class StructuralDuplicateAnalyzer:
             "low_confidence": low_confidence,
             "total_found": len(duplicates)
         }
+
+
+# Alias for backward compatibility
+StructuralAnalyzer = StructuralDuplicateAnalyzer

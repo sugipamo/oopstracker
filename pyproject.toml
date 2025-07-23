@@ -81,8 +81,7 @@ Repository = "https://github.com/evocoder/oopstracker"
 Issues = "https://github.com/evocoder/oopstracker/issues"
 
 [project.scripts]
-oopstracker = "oopstracker.cli_simplified:main"
-oopstracker-legacy = "oopstracker.cli:main"
+oopstracker = "oopstracker.cli:cli_main"
 
 [tool.hatch.version]
 path = "src/oopstracker/__init__.py"

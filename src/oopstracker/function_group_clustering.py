@@ -1,214 +1,330 @@
 """
-Function Group Clustering System - Refactored implementation.
-
-This module provides a clean interface to the refactored clustering system,
-maintaining backward compatibility while leveraging the new modular architecture.
+Function Group Clustering System for OOPStracker.
+Groups related functions together for analysis and refactoring.
 """
 
 import logging
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import asyncio
+from collections import defaultdict
 
-from .clustering_models import FunctionGroup, ClusterSplitResult, ClusteringStrategy
-from .function_group_clustering.orchestrator import ClusteringOrchestrator
+from .function_categories import FunctionCategory
+
+
+class ClusteringStrategy(Enum):
+    """Clustering strategies for function grouping."""
+    CATEGORY_BASED = "category_based"
+    SEMANTIC_SIMILARITY = "semantic_similarity"
+    HYBRID = "hybrid"
+
+
+@dataclass
+class FunctionGroup:
+    """Represents a group of related functions."""
+    group_id: str
+    functions: List[Dict[str, Any]]
+    label: str
+    confidence: float = 0.8
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        if not self.functions:
+            self.functions = []
+    
+    @property
+    def size(self) -> int:
+        """Get the number of functions in this group."""
+        return len(self.functions)
+    
+    def add_function(self, function: Dict[str, Any]):
+        """Add a function to this group."""
+        self.functions.append(function)
+    
+    def get_function_names(self) -> List[str]:
+        """Get list of function names in this group."""
+        return [func.get('name', 'unknown') for func in self.functions]
+
+
+@dataclass
+class ClusterSplitResult:
+    """Result of splitting a cluster."""
+    group_a: FunctionGroup
+    group_b: FunctionGroup
+    split_reason: str
+    confidence: float = 0.8
 
 
 class FunctionGroupClusteringSystem:
-    """
-    Advanced function clustering system with modular architecture.
+    """Main system for clustering functions into related groups."""
     
-    This class provides a facade to the refactored clustering components,
-    maintaining the original API while using the new implementation.
-    """
-    
-    def __init__(self, enable_ai: bool = True):
-        """Initialize the clustering system.
-        
-        Args:
-            enable_ai: Whether to enable AI-based features
-        """
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, enable_ai: bool = False):
         self.enable_ai = enable_ai
+        self.logger = logging.getLogger(__name__)
+        self._cached_clusters = {}
         
-        # Initialize the new orchestrator
-        self.orchestrator = ClusteringOrchestrator(enable_ai=enable_ai)
-        
-        # Configuration (for backward compatibility)
-        self.min_cluster_size = 3
-        self.max_cluster_size = 15
-        self.similarity_threshold = 0.7
-        
-        # Legacy state (for backward compatibility)
-        self.split_patterns: Dict[str, Tuple[str, str]] = {}
-        
-        self.logger.info("Function Group Clustering System initialized (refactored)")
-    
     async def load_all_functions_from_repository(self, code_units: List[Any]) -> List[Dict[str, Any]]:
-        """Load and prepare function data from code units.
-        
-        Args:
-            code_units: List of code units to process
-            
-        Returns:
-            List of function dictionaries
-        """
-        functions = []
+        """Load all functions from code repository."""
+        all_functions = []
         
         for unit in code_units:
+            # CodeUnitオブジェクトから直接関数を取得
             if hasattr(unit, 'type') and unit.type == 'function':
-                function_data = {
+                func_data = {
                     'name': unit.name,
+                    'file': unit.file_path or 'unknown',
+                    'signature': '',  # 署名は別途抽出が必要
                     'code': unit.source_code,
-                    'file_path': unit.file_path,
-                    'start_line': getattr(unit, 'start_line', 0),
-                    'complexity': getattr(unit, 'complexity_score', 0),
-                    'hash': getattr(unit, 'code_hash', ''),
+                    'category': FunctionCategory.UNKNOWN.value,
+                    'line_number': unit.start_line,
+                    'metadata': {
+                        'hash': unit.hash,
+                        'complexity': unit.complexity_score,
+                        'dependencies': unit.dependencies
+                    }
                 }
-                functions.append(function_data)
+                all_functions.append(func_data)
         
-        self.logger.info(f"Loaded {len(functions)} functions from repository")
-        return functions
+        self.logger.info(f"Loaded {len(all_functions)} functions from repository")
+        return all_functions
     
-    async def get_current_function_clusters(
-        self, 
-        functions: List[Dict[str, Any]], 
-        strategy: ClusteringStrategy = ClusteringStrategy.CATEGORY_BASED
-    ) -> List[FunctionGroup]:
-        """Group functions into clusters based on the specified strategy.
+    async def get_current_function_clusters(self, 
+                                          functions: List[Dict[str, Any]], 
+                                          strategy: ClusteringStrategy = ClusteringStrategy.CATEGORY_BASED) -> List[FunctionGroup]:
+        """Get current function clusters using specified strategy."""
         
-        Args:
-            functions: List of function dictionaries
-            strategy: Clustering strategy to use
-            
-        Returns:
-            List of function groups
-        """
-        clusters = await self.orchestrator.cluster_functions(functions, strategy)
+        if strategy == ClusteringStrategy.CATEGORY_BASED:
+            return await self._cluster_by_category(functions)
+        elif strategy == ClusteringStrategy.SEMANTIC_SIMILARITY:
+            return await self._cluster_by_semantic_similarity(functions)
+        elif strategy == ClusteringStrategy.HYBRID:
+            return await self._cluster_hybrid(functions)
+        else:
+            return await self._cluster_by_category(functions)
+    
+    async def _cluster_by_category(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
+        """Cluster functions by their categories."""
+        category_groups = defaultdict(list)
+        
+        for func in functions:
+            category = func.get('category', FunctionCategory.UNKNOWN.value)
+            category_groups[category].append(func)
+        
+        clusters = []
+        for category, func_list in category_groups.items():
+            if func_list:  # Only create groups with functions
+                group = FunctionGroup(
+                    group_id=f"category_{category}",
+                    functions=func_list,
+                    label=f"{category.replace('_', ' ').title()} Functions",
+                    confidence=0.9,
+                    metadata={
+                        'strategy': 'category_based',
+                        'category': category
+                    }
+                )
+                clusters.append(group)
+        
+        self.logger.info(f"Created {len(clusters)} category-based clusters")
         return clusters
     
-    async def hierarchical_cluster_and_classify(
-        self,
-        functions: List[Dict[str, Any]],
-        max_group_size: int = 50,
-        max_depth: int = 8
-    ) -> List[FunctionGroup]:
-        """Hierarchically cluster and classify functions.
+    async def _cluster_by_semantic_similarity(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
+        """Cluster functions by semantic similarity."""
+        # Simple implementation - group by common prefixes in function names
+        prefix_groups = defaultdict(list)
         
-        This method uses the hybrid strategy for hierarchical clustering.
+        for func in functions:
+            name = func.get('name', '')
+            # Extract common prefixes (first word before underscore)
+            prefix = name.split('_')[0] if '_' in name else name[:3]
+            prefix_groups[prefix].append(func)
         
-        Args:
-            functions: List of function dictionaries
-            max_group_size: Maximum size before splitting
-            max_depth: Maximum recursion depth
-            
-        Returns:
-            List of classified function groups
-        """
-        # Use hybrid strategy for hierarchical clustering
-        clusters = await self.orchestrator.cluster_functions(
-            functions, 
-            ClusteringStrategy.HYBRID
-        )
+        clusters = []
+        for prefix, func_list in prefix_groups.items():
+            if len(func_list) > 1:  # Only create groups with multiple functions
+                group = FunctionGroup(
+                    group_id=f"semantic_{prefix}",
+                    functions=func_list,
+                    label=f"Functions with '{prefix}' pattern",
+                    confidence=0.7,
+                    metadata={
+                        'strategy': 'semantic_similarity',
+                        'prefix': prefix
+                    }
+                )
+                clusters.append(group)
         
-        # The new implementation handles size constraints internally
-        self.logger.info(
-            f"Hierarchical clustering complete: {len(functions)} functions -> {len(clusters)} groups"
-        )
+        # Add remaining single functions to an "unclustered" group
+        unclustered = []
+        for prefix, func_list in prefix_groups.items():
+            if len(func_list) == 1:
+                unclustered.extend(func_list)
         
+        if unclustered:
+            group = FunctionGroup(
+                group_id="semantic_unclustered",
+                functions=unclustered,
+                label="Unclustered Functions",
+                confidence=0.5,
+                metadata={'strategy': 'semantic_similarity'}
+            )
+            clusters.append(group)
+        
+        self.logger.info(f"Created {len(clusters)} semantic similarity clusters")
         return clusters
     
-    def select_clusters_that_need_manual_split(
-        self, 
-        clusters: List[FunctionGroup]
-    ) -> List[FunctionGroup]:
-        """Select clusters that need manual splitting based on size and confidence.
+    async def _cluster_hybrid(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
+        """Cluster functions using hybrid approach."""
+        # Combine category and semantic clustering
+        category_clusters = await self._cluster_by_category(functions)
         
-        Args:
-            clusters: List of function groups
+        # Further split large category clusters by semantic similarity
+        refined_clusters = []
+        
+        for cluster in category_clusters:
+            if cluster.size > 5:  # Split large clusters
+                sub_clusters = await self._cluster_by_semantic_similarity(cluster.functions)
+                for sub_cluster in sub_clusters:
+                    sub_cluster.group_id = f"{cluster.group_id}_{sub_cluster.group_id}"
+                    sub_cluster.label = f"{cluster.label} - {sub_cluster.label}"
+                    sub_cluster.metadata.update(cluster.metadata)
+                    sub_cluster.metadata['parent_cluster'] = cluster.group_id
+                refined_clusters.extend(sub_clusters)
+            else:
+                refined_clusters.append(cluster)
+        
+        self.logger.info(f"Created {len(refined_clusters)} hybrid clusters")
+        return refined_clusters
+    
+    async def analyze_cluster_quality(self, clusters: List[FunctionGroup]) -> Dict[str, Any]:
+        """Analyze the quality of clustering results."""
+        total_functions = sum(cluster.size for cluster in clusters)
+        
+        # Calculate cluster statistics
+        cluster_sizes = [cluster.size for cluster in clusters]
+        avg_cluster_size = sum(cluster_sizes) / len(cluster_sizes) if cluster_sizes else 0
+        
+        # Find largest and smallest clusters
+        largest_cluster = max(clusters, key=lambda c: c.size) if clusters else None
+        smallest_cluster = min(clusters, key=lambda c: c.size) if clusters else None
+        
+        quality_metrics = {
+            'total_clusters': len(clusters),
+            'total_functions': total_functions,
+            'average_cluster_size': round(avg_cluster_size, 2),
+            'largest_cluster': {
+                'id': largest_cluster.group_id,
+                'size': largest_cluster.size,
+                'label': largest_cluster.label
+            } if largest_cluster else None,
+            'smallest_cluster': {
+                'id': smallest_cluster.group_id,
+                'size': smallest_cluster.size,
+                'label': smallest_cluster.label  
+            } if smallest_cluster else None,
+            'cluster_distribution': cluster_sizes
+        }
+        
+        return quality_metrics
+    
+    async def suggest_cluster_splits(self, cluster: FunctionGroup) -> List[ClusterSplitResult]:
+        """Suggest ways to split a large cluster."""
+        if cluster.size < 4:
+            return []  # Too small to split meaningfully
+        
+        suggestions = []
+        
+        # Split by file location
+        file_groups = defaultdict(list)
+        for func in cluster.functions:
+            file_path = func.get('file', 'unknown')
+            file_groups[file_path].append(func)
+        
+        if len(file_groups) > 1:
+            # Create split based on most common files
+            sorted_files = sorted(file_groups.items(), key=lambda x: len(x[1]), reverse=True)
+            main_file_funcs = sorted_files[0][1]
+            other_file_funcs = []
+            for _, funcs in sorted_files[1:]:
+                other_file_funcs.extend(funcs)
             
-        Returns:
-            List of clusters that need splitting
-        """
-        candidates = []
+            if len(main_file_funcs) > 0 and len(other_file_funcs) > 0:
+                group_a = FunctionGroup(
+                    group_id=f"{cluster.group_id}_main_file",
+                    functions=main_file_funcs,
+                    label=f"{cluster.label} (Main File)",
+                    confidence=0.8
+                )
+                
+                group_b = FunctionGroup(
+                    group_id=f"{cluster.group_id}_other_files",
+                    functions=other_file_funcs,
+                    label=f"{cluster.label} (Other Files)",
+                    confidence=0.8
+                )
+                
+                suggestions.append(ClusterSplitResult(
+                    group_a=group_a,
+                    group_b=group_b,
+                    split_reason="Split by file location",
+                    confidence=0.8
+                ))
+        
+        return suggestions
+    
+    def export_clusters_to_dict(self, clusters: List[FunctionGroup]) -> Dict[str, Any]:
+        """Export clusters to dictionary format."""
+        return {
+            'clusters': [
+                {
+                    'group_id': cluster.group_id,
+                    'label': cluster.label,
+                    'size': cluster.size,
+                    'confidence': cluster.confidence,
+                    'function_names': cluster.get_function_names(),
+                    'metadata': cluster.metadata
+                }
+                for cluster in clusters
+            ],
+            'total_clusters': len(clusters),
+            'total_functions': sum(cluster.size for cluster in clusters)
+        }
+
+
+async def demo_clustering_system():
+    """Demo the clustering system."""
+    system = FunctionGroupClusteringSystem(enable_ai=True)
+    
+    # Sample functions
+    sample_functions = [
+        {'name': 'get_user_name', 'category': 'getter', 'file': 'user.py'},
+        {'name': 'set_user_name', 'category': 'setter', 'file': 'user.py'},
+        {'name': 'get_user_email', 'category': 'getter', 'file': 'user.py'},  
+        {'name': 'validate_email', 'category': 'validation', 'file': 'validators.py'},
+        {'name': 'validate_password', 'category': 'validation', 'file': 'validators.py'},
+        {'name': 'process_payment', 'category': 'business_logic', 'file': 'payments.py'},
+        {'name': 'calculate_tax', 'category': 'business_logic', 'file': 'taxes.py'}
+    ]
+    
+    print("🔍 Function Group Clustering Demo")
+    print("=" * 40)
+    
+    for strategy in ClusteringStrategy:
+        print(f"\n📊 Strategy: {strategy.value}")
+        clusters = await system.get_current_function_clusters(sample_functions, strategy)
         
         for cluster in clusters:
-            function_count = len(cluster.functions)
-            
-            # Size-based selection
-            if function_count > self.max_cluster_size:
-                candidates.append(cluster)
-                continue
-            
-            # Confidence-based selection
-            if cluster.confidence < 0.6:
-                candidates.append(cluster)
-                continue
-            
-            # Complexity variance
-            complexities = [f.get('complexity', 0) for f in cluster.functions]
-            if complexities and len(set(complexities)) > len(complexities) * 0.7:
-                candidates.append(cluster)
-        
-        self.logger.info(f"Selected {len(candidates)} clusters for manual splitting")
-        return candidates
+            print(f"  📁 {cluster.label} ({cluster.size} functions)")
+            for func_name in cluster.get_function_names():
+                print(f"    - {func_name}")
     
-    def get_clustering_insights(self) -> Dict[str, Any]:
-        """Get insights about the current clustering state.
-        
-        Returns:
-            Dictionary of insights
-        """
-        return self.orchestrator.get_insights()
-    
-    # Properties for backward compatibility
-    @property
-    def current_clusters(self) -> List[FunctionGroup]:
-        """Get current clusters."""
-        return self.orchestrator.current_clusters
-    
-    @property
-    def cluster_history(self) -> List[Dict[str, Any]]:
-        """Get cluster history."""
-        timeline = self.orchestrator.metadata_recorder.get_clustering_timeline()
-        return [t['details'] for t in timeline if t['type'] == 'clustering']
-    
-    # Additional methods for extended functionality
-    
-    async def optimize_clusters(self) -> List[FunctionGroup]:
-        """Automatically optimize clusters based on insights.
-        
-        Returns:
-            Optimized clusters
-        """
-        return await self.orchestrator.optimize_clusters()
-    
-    def get_quality_assessment(self) -> Dict[str, Any]:
-        """Get quality assessment of current clusters.
-        
-        Returns:
-            Quality assessment dictionary
-        """
-        return self.orchestrator.get_quality_assessment()
-    
-    def get_recommendations(self) -> List[Dict[str, Any]]:
-        """Get recommendations for improving clustering.
-        
-        Returns:
-            List of recommendations
-        """
-        return self.orchestrator.get_recommendations()
-    
-    def export_state(self) -> Dict[str, Any]:
-        """Export the current state for persistence.
-        
-        Returns:
-            State dictionary
-        """
-        return self.orchestrator.export_state()
-    
-    def import_state(self, state: Dict[str, Any]):
-        """Import a previously exported state.
-        
-        Args:
-            state: State dictionary to import
-        """
-        self.orchestrator.import_state(state)
+    # Quality analysis
+    quality = await system.analyze_cluster_quality(clusters)
+    print(f"\n📈 Quality Metrics:")
+    print(f"  Total clusters: {quality['total_clusters']}")
+    print(f"  Average cluster size: {quality['average_cluster_size']}")
+
+
+if __name__ == "__main__":
+    asyncio.run(demo_clustering_system())

@@ -8,11 +8,19 @@ import logging
 import re
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
+from enum import Enum
 
 from oopstracker.models import CodeRecord
 from pattern_intent import IntentGenerator
 
 logger = logging.getLogger(__name__)
+
+
+class SemanticAnalysisStatus(Enum):
+    """意味的分析の状態"""
+    SUCCESS = "success"
+    FAILED = "failed"
+    PENDING = "pending"
 
 
 @dataclass
@@ -237,3 +245,7 @@ class SemanticDuplicateAnalyzer:
             similarity = min(1.0, similarity + 0.3)
         
         return similarity
+
+
+# Alias for backward compatibility
+SemanticAnalyzer = SemanticDuplicateAnalyzer

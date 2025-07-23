@@ -41,9 +41,9 @@ class SchemaManager:
         """Create all database tables."""
         tables = [
             self._get_code_records_table_sql(),
-            self._get_dependencies_table_sql(),
-            self._get_database_info_table_sql(),
-            self._get_file_tracking_table_sql()
+            self._get_classification_rules_table_sql(),
+            self._get_file_tracking_table_sql(),
+            self._get_database_info_table_sql()
         ]
         
         for table_sql in tables:
@@ -52,44 +52,36 @@ class SchemaManager:
     def _get_code_records_table_sql(self) -> str:
         """Get SQL for creating code records table."""
         return """
-            CREATE TABLE IF NOT EXISTS ast_code_records (
+            CREATE TABLE IF NOT EXISTS code_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code_hash TEXT UNIQUE NOT NULL,
                 code_content TEXT NOT NULL,
+                normalized_code TEXT,
                 function_name TEXT,
                 file_path TEXT,
                 timestamp TEXT NOT NULL,
-                simhash TEXT,
-                
-                -- AST-specific fields
-                unit_type TEXT NOT NULL,
-                start_line INTEGER,
-                end_line INTEGER,
-                complexity_score INTEGER,
-                ast_structure TEXT,
-                
-                -- Metadata as JSON
-                metadata TEXT
+                metadata TEXT,
+                simhash TEXT
             )
         """
     
-    def _get_dependencies_table_sql(self) -> str:
-        """Get SQL for creating dependencies table."""
+    def _get_classification_rules_table_sql(self) -> str:
+        """Get SQL for creating classification rules table."""
         return """
-            CREATE TABLE IF NOT EXISTS ast_dependencies (
+            CREATE TABLE IF NOT EXISTS classification_rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code_hash TEXT NOT NULL,
-                dependency TEXT NOT NULL,
-                
-                FOREIGN KEY (code_hash) REFERENCES ast_code_records (code_hash),
-                UNIQUE(code_hash, dependency)
+                pattern TEXT NOT NULL,
+                category TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                rule_type TEXT DEFAULT 'pattern',
+                created_at TEXT NOT NULL
             )
         """
     
     def _get_database_info_table_sql(self) -> str:
         """Get SQL for creating database info table."""
         return """
-            CREATE TABLE IF NOT EXISTS ast_database_info (
+            CREATE TABLE IF NOT EXISTS database_info (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
@@ -98,26 +90,25 @@ class SchemaManager:
     def _get_file_tracking_table_sql(self) -> str:
         """Get SQL for creating file tracking table."""
         return """
-            CREATE TABLE IF NOT EXISTS ast_file_tracking (
+            CREATE TABLE IF NOT EXISTS file_tracking (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_path TEXT UNIQUE NOT NULL,
-                file_hash TEXT NOT NULL,
                 last_modified TEXT NOT NULL,
-                last_scanned TEXT NOT NULL,
-                unit_count INTEGER DEFAULT 0
+                file_hash TEXT NOT NULL,
+                scan_timestamp TEXT NOT NULL
             )
         """
     
     def _create_indexes(self):
         """Create database indexes for performance."""
         indexes = [
-            ("idx_code_hash", "ast_code_records", "code_hash"),
-            ("idx_function_name", "ast_code_records", "function_name"),
-            ("idx_file_path", "ast_code_records", "file_path"),
-            ("idx_unit_type", "ast_code_records", "unit_type"),
-            ("idx_simhash", "ast_code_records", "simhash"),
-            ("idx_file_tracking_path", "ast_file_tracking", "file_path"),
-            ("idx_file_tracking_hash", "ast_file_tracking", "file_hash")
+            ("idx_code_hash", "code_records", "code_hash"),
+            ("idx_function_name", "code_records", "function_name"),
+            ("idx_file_path", "code_records", "file_path"),
+            ("idx_simhash", "code_records", "simhash"),
+            ("idx_file_tracking_path", "file_tracking", "file_path"),
+            ("idx_file_tracking_hash", "file_tracking", "file_hash"),
+            ("idx_classification_rules_type", "classification_rules", "rule_type")
         ]
         
         for index_name, table_name, column_name in indexes:
@@ -128,13 +119,13 @@ class SchemaManager:
         """Initialize database metadata."""
         # Insert schema version
         self.connection_manager.execute("""
-            INSERT OR REPLACE INTO ast_database_info (key, value)
+            INSERT OR REPLACE INTO database_info (key, value)
             VALUES ('schema_version', ?)
         """, (self.SCHEMA_VERSION,))
         
         # Insert creation timestamp
         self.connection_manager.execute("""
-            INSERT OR IGNORE INTO ast_database_info (key, value)
+            INSERT OR IGNORE INTO database_info (key, value)
             VALUES ('created_at', ?)
         """, (datetime.now().isoformat(),))
         
@@ -143,7 +134,7 @@ class SchemaManager:
     def get_schema_version(self) -> str:
         """Get current schema version from database."""
         cursor = self.connection_manager.execute(
-            "SELECT value FROM ast_database_info WHERE key = 'schema_version'"
+            "SELECT value FROM database_info WHERE key = 'schema_version'"
         )
         result = cursor.fetchone()
         return result['value'] if result else None

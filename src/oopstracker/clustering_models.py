@@ -16,8 +16,16 @@ class FunctionGroup:
     functions: List[Dict[str, Any]]
     label: str
     confidence: float
+    primary_patterns: List[str] = None
+    risk_level: str = "low"
     split_patterns: Optional[Tuple[str, str]] = None
     metadata: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.primary_patterns is None:
+            self.primary_patterns = []
+        if self.metadata is None:
+            self.metadata = {}
 
 
 @dataclass

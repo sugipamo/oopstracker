@@ -34,10 +34,16 @@ class CodeUnit:
     ast_structure: Optional[str] = None
     complexity_score: Optional[int] = None
     dependencies: List[str] = None
+    hash: Optional[str] = None  # Hash for SimHash calculations
     
     def __post_init__(self):
         if self.dependencies is None:
             self.dependencies = []
+        if self.hash is None:
+            # Generate hash based on content
+            import hashlib
+            content_for_hash = f"{self.name}:{self.source_code}"
+            self.hash = hashlib.md5(content_for_hash.encode()).hexdigest()
 
 
 class CompositeVisitor:
@@ -115,6 +121,20 @@ class ASTAnalyzer:
         except SyntaxError as e:
             logger.info(f"Syntax error in {file_path}: {e}")
             return []
+    
+    def extract_code_units(self, source_code: str, file_path: Optional[str] = None) -> List[CodeUnit]:
+        """
+        Extract code units from Python source code.
+        Alias for parse_code for backward compatibility.
+        
+        Args:
+            source_code: Python source code
+            file_path: Optional file path for context
+            
+        Returns:
+            List of CodeUnit objects
+        """
+        return self.parse_code(source_code, file_path)
     
     def parse_code(self, source_code: str, file_path: Optional[str] = None) -> List[CodeUnit]:
         """

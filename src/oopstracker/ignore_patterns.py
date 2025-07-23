@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import List, Set, Optional
 
+from .path_handler import PathHandler
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class IgnorePatterns:
             use_gitignore: Whether to respect .gitignore files (default: True)
             include_tests: Whether to include test directories and test functions (default: False)
         """
-        self.project_root = Path(project_root or os.getcwd()).resolve()
+        self.path_handler = PathHandler(project_root or os.getcwd())
         self.ignore_file = ignore_file or ".oopsignore"
         self.use_gitignore = use_gitignore
         self.include_tests = include_tests
@@ -148,7 +149,7 @@ class IgnorePatterns:
     
     def load_ignore_file(self) -> None:
         """Load patterns from .oopsignore file."""
-        ignore_path = self.project_root / self.ignore_file
+        ignore_path = self.path_handler.project_root / self.ignore_file
         
         if not ignore_path.exists():
             return
@@ -166,7 +167,7 @@ class IgnorePatterns:
     def load_gitignore_files(self) -> None:
         """Load patterns from .gitignore files (project root and parent directories)."""
         # Start from project root and walk up to find .gitignore files
-        current_dir = self.project_root
+        current_dir = self.path_handler.project_root
         
         while current_dir != current_dir.parent:  # Stop at filesystem root
             gitignore_path = current_dir / ".gitignore"
@@ -211,15 +212,15 @@ class IgnorePatterns:
         is_directory = pattern.endswith('/')
         
         # Calculate relative path from project root to gitignore directory
-        try:
-            rel_gitignore_dir = gitignore_dir.relative_to(self.project_root)
+        if self.path_handler.is_within_project(gitignore_dir):
+            rel_gitignore_dir = self.path_handler.get_relative_path(gitignore_dir)
             if str(rel_gitignore_dir) != '.':
                 # Prefix pattern with relative directory path
                 if is_directory:
                     pattern = str(rel_gitignore_dir / pattern[:-1]) + '/'
                 else:
                     pattern = str(rel_gitignore_dir / pattern)
-        except ValueError:
+        else:
             # gitignore_dir is outside project root, skip
             return None
         
@@ -287,12 +288,9 @@ class IgnorePatterns:
         Returns:
             True if file should be ignored, False otherwise
         """
-        # Convert to relative path for matching
-        try:
-            rel_path = file_path.relative_to(self.project_root)
-        except ValueError:
-            # If file is outside project root, use absolute path
-            rel_path = file_path
+        # Normalize input and get relative path for matching
+        normalized_path = self.path_handler.normalize_path(file_path)
+        rel_path = self.path_handler.get_relative_path(normalized_path)
         
         path_str = str(rel_path)
         path_parts = rel_path.parts
@@ -376,7 +374,7 @@ class IgnorePatterns:
     
     def save_ignore_file(self) -> None:
         """Save current patterns to .oopsignore file."""
-        ignore_path = self.project_root / self.ignore_file
+        ignore_path = self.path_handler.project_root / self.ignore_file
         
         # Filter out default patterns for saving
         custom_patterns = self.patterns - set(self.DEFAULT_PATTERNS)

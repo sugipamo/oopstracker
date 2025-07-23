@@ -7,7 +7,7 @@ and _analyze_function_name for better separation of concerns. No new functionali
 import re
 from typing import Dict, Any, Optional
 
-from ..akinator_classifier import FunctionCategory
+from ..function_categories import FunctionCategory
 
 
 class StructuralAnalysisStrategy:
@@ -95,50 +95,12 @@ class StructuralAnalysisStrategy:
     def _analyze_function_name(self, function_name: str) -> Dict[str, Any]:
         """Analyze function name for semantic clues.
         
-        Extracted from FunctionTaxonomyExpert._analyze_function_name method.
+        This method now returns unknown for all cases, 
+        forcing the system to rely on AI classification only.
         """
-        name_lower = function_name.lower()
-        
-        # Name pattern analysis (original logic preserved)
-        if name_lower.startswith('get_'):
-            return {
-                "suggested_category": FunctionCategory.GETTER.value,
-                "confidence": 0.8,
-                "indicators": ["getter naming pattern"]
-            }
-        elif name_lower.startswith('set_'):
-            return {
-                "suggested_category": FunctionCategory.SETTER.value,
-                "confidence": 0.8,
-                "indicators": ["setter naming pattern"]
-            }
-        elif name_lower == '__init__':
-            return {
-                "suggested_category": FunctionCategory.CONSTRUCTOR.value,
-                "confidence": 0.9,
-                "indicators": ["constructor method"]
-            }
-        elif name_lower.startswith('test_') or name_lower.endswith('_test'):
-            return {
-                "suggested_category": FunctionCategory.TEST_FUNCTION.value,
-                "confidence": 0.85,
-                "indicators": ["test function naming pattern"]
-            }
-        elif any(prefix in name_lower for prefix in ['validate_', 'check_', 'verify_']):
-            return {
-                "suggested_category": FunctionCategory.VALIDATION.value,
-                "confidence": 0.75,
-                "indicators": ["validation naming pattern"]
-            }
-        elif any(keyword in name_lower for keyword in ['convert_', 'transform_', 'parse_']):
-            return {
-                "suggested_category": FunctionCategory.CONVERSION.value,
-                "confidence": 0.75,
-                "indicators": ["conversion/transformation naming pattern"]
-            }
-        else:
-            return {
-                "suggested_category": FunctionCategory.UNKNOWN.value,
-                "confidence": 0.0,
-                "indicators": []
-            }
+        # Pattern-based analysis removed - rely on AI classification
+        return {
+            "suggested_category": FunctionCategory.UNKNOWN.value,
+            "confidence": 0.0,
+            "indicators": []
+        }

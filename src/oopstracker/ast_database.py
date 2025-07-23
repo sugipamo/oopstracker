@@ -232,3 +232,100 @@ class ASTDatabaseManager:
             List of deleted file paths
         """
         return self.file_tracking.check_deleted_files(current_files)
+    
+    def load_all_records(self) -> List[CodeRecord]:
+        """
+        Load all code records from database.
+        
+        Returns:
+            List of CodeRecord objects
+        """
+        try:
+            cursor = self.connection_manager.execute(
+                "SELECT id, code_hash, code_content, function_name, file_path, timestamp, simhash, unit_type, start_line, end_line, complexity_score, metadata FROM ast_code_records ORDER BY file_path, start_line"
+            )
+            records = []
+            for row in cursor.fetchall():
+                record = CodeRecord(
+                    id=row[0],
+                    code_hash=row[1],
+                    code_content=row[2],
+                    function_name=row[3],
+                    file_path=row[4],
+                    timestamp=row[5],
+                    simhash=row[6],
+                    metadata={}
+                )
+                records.append(record)
+            return records
+        except Exception as e:
+            logger.error(f"Failed to load all records: {e}")
+            return []
+    
+    def get_records_by_file(self, file_path: str) -> List[CodeRecord]:
+        """
+        Get all records for a specific file.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            List of CodeRecord objects
+        """
+        try:
+            cursor = self.connection_manager.execute(
+                "SELECT id, code_hash, code_content, function_name, file_path, timestamp, simhash, unit_type, start_line, end_line, complexity_score, metadata FROM ast_code_records WHERE file_path = ? ORDER BY start_line",
+                (file_path,)
+            )
+            records = []
+            for row in cursor.fetchall():
+                record = CodeRecord(
+                    id=row[0],
+                    code_hash=row[1],
+                    code_content=row[2],
+                    function_name=row[3],
+                    file_path=row[4],
+                    timestamp=row[5],
+                    simhash=row[6],
+                    metadata={}
+                )
+                records.append(record)
+            return records
+        except Exception as e:
+            logger.error(f"Failed to get records by file: {e}")
+            return []
+    
+    def save_record(self, record: CodeRecord, unit: CodeUnit = None) -> bool:
+        """
+        Save a code record to the database.
+        Alias for insert_record for backward compatibility.
+        
+        Args:
+            record: CodeRecord to save
+            unit: Optional CodeUnit with AST data
+            
+        Returns:
+            True if saved successfully
+        """
+        if unit:
+            return self.insert_record(record, unit)
+        else:
+            # Create a minimal CodeUnit if not provided
+            from .ast_analyzer import CodeUnit
+            minimal_unit = CodeUnit(
+                name=record.function_name or "unknown",
+                type="function",
+                source_code=record.code_content or "",
+                start_line=0,
+                end_line=0,
+                file_path=record.file_path
+            )
+            return self.insert_record(record, minimal_unit)
+    
+    def has_data(self) -> bool:
+        """Check if the database has any code records.
+        
+        Returns:
+            True if database contains code records, False otherwise
+        """
+        return self.code_records.has_any_records()

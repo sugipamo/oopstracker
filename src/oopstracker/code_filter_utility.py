@@ -201,3 +201,27 @@ class CodeFilterUtility:
             'arg_count': len(node.args.args),
             'parse_error': False
         }
+    
+    def should_exclude_unit(self, unit) -> bool:
+        """
+        Determine if a code unit should be excluded from analysis.
+        
+        Args:
+            unit: Code unit to evaluate (from AST analyzer)
+            
+        Returns:
+            True if the unit should be excluded
+        """
+        if not unit:
+            return True
+            
+        # Get unit name
+        unit_name = getattr(unit, 'name', '')
+        
+        # Create a CodeRecord-like object for compatibility
+        record = CodeRecord(
+            function_name=unit_name,
+            code_content=getattr(unit, 'source_code', '')
+        )
+        
+        return self.should_exclude_record(record)

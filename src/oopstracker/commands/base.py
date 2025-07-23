@@ -5,15 +5,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..ast_simhash_detector import ASTSimHashDetector
-from ..semantic_detector import SemanticAwareDuplicateDetector
+from ..unified_detector import UnifiedDetectionService
 
 
 @dataclass
 class CommandContext:
     """Context passed to command handlers."""
-    detector: ASTSimHashDetector
-    semantic_detector: Optional[SemanticAwareDuplicateDetector]
+    detector: UnifiedDetectionService
+    semantic_detector: Optional[Any]
     args: Any  # argparse.Namespace
     
     
@@ -39,4 +38,10 @@ class BaseCommand(ABC):
     @abstractmethod
     def add_arguments(cls, parser):
         """Add command-specific arguments to the parser."""
+        pass
+        
+    @classmethod
+    @abstractmethod
+    def help(cls) -> str:
+        """Return help text for the command."""
         pass

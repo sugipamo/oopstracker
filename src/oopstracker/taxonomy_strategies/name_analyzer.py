@@ -1,7 +1,7 @@
 """Function name analyzer for semantic classification."""
 
 from typing import Dict, Any
-from ..akinator_classifier import FunctionCategory
+from ..function_categories import FunctionCategory
 
 
 class FunctionNameAnalyzer:
@@ -68,44 +68,17 @@ class FunctionNameAnalyzer:
     def analyze(self, function_name: str) -> Dict[str, Any]:
         """Analyze function name for semantic clues.
         
+        This method now returns unknown for all cases,
+        forcing the system to rely on AI classification only.
+        Pattern-based analysis has been removed.
+        
         Args:
             function_name: The name of the function to analyze
             
         Returns:
             Dictionary containing suggested category, confidence, and indicators
         """
-        if not function_name:
-            return self._unknown_result()
-        
-        name_lower = function_name.lower()
-        
-        # Check special names first
-        if name_lower in self.special_names:
-            category, confidence, indicator = self.special_names[name_lower]
-            return {
-                "suggested_category": category.value,
-                "confidence": confidence,
-                "indicators": [indicator]
-            }
-        
-        # Check prefix patterns
-        for prefix, (category, confidence, indicator) in self.prefix_patterns.items():
-            if name_lower.startswith(prefix):
-                return {
-                    "suggested_category": category.value,
-                    "confidence": confidence,
-                    "indicators": [indicator]
-                }
-        
-        # Check keyword patterns
-        for pattern_name, pattern_info in self.keyword_patterns.items():
-            if any(keyword in name_lower for keyword in pattern_info['keywords']):
-                return {
-                    "suggested_category": pattern_info['category'].value,
-                    "confidence": pattern_info['confidence'],
-                    "indicators": [pattern_info['indicator']]
-                }
-        
+        # All pattern-based analysis removed - rely on AI classification
         return self._unknown_result()
     
     def _unknown_result(self) -> Dict[str, Any]:

@@ -11,7 +11,6 @@ from typing import List, Dict, Tuple, Any, Optional
 from datetime import datetime
 
 from .function_group_clustering import FunctionGroup, ClusterSplitResult
-from .split_strategy_manager import SplitStrategyManager
 from .split_rule_repository import SplitRuleRepository, SplitRule
 from .llm_split_service import LLMSplitService
 from .group_split_coordinator import GroupSplitCoordinator
@@ -29,7 +28,6 @@ class SmartGroupSplitter:
         self.llm_group_threshold = 100
         
         # Initialize extracted components
-        self.strategy_manager = SplitStrategyManager()
         self.rule_repository = SplitRuleRepository()
         self.llm_service = LLMSplitService(enable_ai=enable_ai)
         self.split_coordinator = GroupSplitCoordinator()
@@ -41,7 +39,8 @@ class SmartGroupSplitter:
     
     def recommend_split_strategy(self, group: FunctionGroup):
         """Recommend appropriate split strategy based on group type."""
-        return self.strategy_manager.recommend_strategy(group)
+        # Pattern-based strategy removed - rely on AI-based splitting
+        return None
     
     def _create_subgroups_from_split_results(self, group: FunctionGroup, split_results: List[Dict]) -> List[FunctionGroup]:
         """Create FunctionGroup objects from split results."""
@@ -66,9 +65,9 @@ class SmartGroupSplitter:
         if not self.should_split(group):
             return [group]
         
-        strategy = self.recommend_split_strategy(group)
-        split_results = self.strategy_manager.apply_strategy(group, strategy)
-        subgroups = self._create_subgroups_from_split_results(group, split_results)
+        # Strategy-based splitting has been removed
+        # Return the original group unchanged
+        subgroups = [group]
         
         # Handle recursive splitting for large "Other" groups
         if recursive:

@@ -43,21 +43,23 @@ class SimHashCalculator:
             logger.debug(f"Code unit already exists: {unit.hash}")
             return None
             
-        # Add to BKTree
-        self.bk_tree.add(unit.hash)
-        
-        # Store code unit
-        self.code_units[unit.hash] = unit
-        
-        # Create and store record
+        # Create record first
         record = CodeRecord(
-            hash=unit.hash,
-            full_path=unit.file_path,
+            code_hash=unit.hash,
+            file_path=unit.file_path,
             function_name=unit.name,
-            source_code=unit.source_code,
-            line_number=unit.line_number,
-            simhash_value=unit.simhash
+            code_content=unit.source_code
         )
+        
+        # Generate simhash for BKTree operations  
+        from simhash import Simhash
+        simhash_value = Simhash(unit.source_code).value
+        
+        # Add to BKTree with simhash value
+        self.bk_tree.insert(simhash_value, record)
+        
+        # Store code unit and record
+        self.code_units[unit.hash] = unit
         self.records[unit.hash] = record
         
         logger.debug(f"Added code unit: {unit.name} from {unit.file_path}")

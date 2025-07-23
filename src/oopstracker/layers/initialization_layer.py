@@ -9,7 +9,7 @@ from ..integrations.learning_stats_manager import LearningStatsManager
 from ..result_aggregator import ResultAggregator
 from ..analyzers.structural_analyzer import StructuralAnalyzer
 from ..analyzers.result_combiner import ResultCombiner
-from ..semantic_analysis_coordinator import SemanticAnalysisCoordinator
+# from ..semantic_analysis_coordinator import SemanticAnalysisCoordinator
 
 
 class InitializationLayer:
@@ -34,7 +34,7 @@ class InitializationLayer:
         self.learning_stats_manager: Optional[LearningStatsManager] = None
         self.result_aggregator: Optional[ResultAggregator] = None
         self.result_combiner: Optional[ResultCombiner] = None
-        self.semantic_coordinator: Optional[SemanticAnalysisCoordinator] = None
+        self.semantic_coordinator = None  # Optional[SemanticAnalysisCoordinator] = None
     
     def initialize_components(self) -> dict:
         """Initialize all components and return them.
@@ -58,7 +58,7 @@ class InitializationLayer:
         self.result_combiner = ResultCombiner()
         
         # Initialize semantic coordinator
-        self.semantic_coordinator = SemanticAnalysisCoordinator(self.intent_unified_available)
+        # self.semantic_coordinator = SemanticAnalysisCoordinator(self.intent_unified_available)
         
         self.logger.info("Component initialization complete")
         
