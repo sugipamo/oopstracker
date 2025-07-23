@@ -88,57 +88,21 @@ class AkinatorClassifier:
     
     def _initialize_basic_rules(self):
         """Initialize with basic classification rules."""
-        basic_rules = [
-            ClassificationRule(
-                rule_id="getter_basic",
-                pattern=r"def\s+get_\w+\s*\(",
-                category=FunctionCategory.GETTER.value,
-                description="Basic getter function pattern",
-                examples=["def get_name(self):", "def get_value():"]
-            ),
-            ClassificationRule(
-                rule_id="setter_basic", 
-                pattern=r"def\s+set_\w+\s*\(",
-                category=FunctionCategory.SETTER.value,
-                description="Basic setter function pattern",
-                examples=["def set_name(self, name):", "def set_value(value):"]
-            ),
-            ClassificationRule(
-                rule_id="constructor_init",
-                pattern=r"def\s+__init__\s*\(",
-                category=FunctionCategory.CONSTRUCTOR.value,
-                description="Constructor (__init__) method",
-                examples=["def __init__(self):", "def __init__(self, name):"]
-            ),
-            ClassificationRule(
-                rule_id="test_function",
-                pattern=r"def\s+test_\w+\s*\(",
-                category=FunctionCategory.TEST_FUNCTION.value,
-                description="Test function pattern",
-                examples=["def test_login():", "def test_validation():"]
-            ),
-            ClassificationRule(
-                rule_id="async_function",
-                pattern=r"async\s+def\s+\w+\s*\(",
-                category=FunctionCategory.ASYNC_HANDLER.value,
-                description="Async function pattern",
-                examples=["async def fetch_data():", "async def process():"]
-            ),
-            ClassificationRule(
-                rule_id="validation_function",
-                pattern=r"def\s+(validate|check|verify)_\w+\s*\(",
-                category=FunctionCategory.VALIDATION.value,
-                description="Validation function pattern",
-                examples=["def validate_email():", "def check_password():"]
-            ),
-            ClassificationRule(
-                rule_id="conversion_function",
-                pattern=r"def\s+(to_|from_|convert_)\w+\s*\(",
-                category=FunctionCategory.CONVERSION.value,
-                description="Conversion function pattern",
-                examples=["def to_json():", "def from_dict():", "def convert_format():"]
+        from .classification_rules import get_default_rules
+        
+        rule_configs = get_default_rules()
+        basic_rules = []
+        
+        for config in rule_configs:
+            rule = ClassificationRule(
+                rule_id=config["rule_id"],
+                pattern=config["pattern"],
+                category=config["category"],
+                description=config["description"],
+                confidence=config.get("confidence", 0.8),
+                examples=config.get("examples", [])
             )
-        ]
+            basic_rules.append(rule)
         
         self.rules.extend(basic_rules)
         self.logger.info(f"Initialized {len(basic_rules)} basic classification rules")
@@ -318,36 +282,11 @@ class AkinatorClassifier:
         
         # Category-specific pattern generation
         if category == "business_logic":
-            # Look for action words in function names
-            action_words = ['process', 'handle', 'execute', 'perform', 'manage', 'calculate']
-            if any(word in func_name.lower() for word in action_words):
-                patterns.append({
-                    'pattern': rf"def\s+(process|handle|execute|perform|manage|calculate)_\w+\s*\(",
-                    'type': 'action_pattern',
-                    'description': f"Business logic function with action word pattern",
-                    'confidence': 0.75
-                })
-        
+            patterns.extend(self._generate_business_logic_patterns(func_name))
         elif category == "data_processing":
-            # Look for data-related words
-            data_words = ['transform', 'format', 'parse', 'serialize', 'filter', 'map', 'reduce']
-            if any(word in func_name.lower() for word in data_words):
-                patterns.append({
-                    'pattern': rf"def\s+(transform|format|parse|serialize|filter|map|reduce)\w*\s*\(",
-                    'type': 'data_pattern',
-                    'description': f"Data processing function pattern",
-                    'confidence': 0.8
-                })
-        
+            patterns.extend(self._generate_data_processing_patterns(func_name))
         elif category == "validation":
-            # Check if function returns boolean or raises exceptions
-            if "return " in function_code and ("True" in function_code or "False" in function_code):
-                patterns.append({
-                    'pattern': rf"def\s+.*{last_part}.*\s*\(",
-                    'type': 'validation_return',
-                    'description': f"Validation function with boolean return",
-                    'confidence': 0.7
-                })
+            patterns.extend(self._generate_validation_patterns(func_name, function_code, last_part))
         
         # Generic pattern based on name structure
         if len(name_parts) > 1:
@@ -367,6 +306,54 @@ class AkinatorClassifier:
                 'confidence': 0.6
             })
         
+        return patterns
+    
+    def _generate_business_logic_patterns(self, func_name: str) -> List[Dict[str, Any]]:
+        """Generate patterns for business logic functions."""
+        from .classification_rules import get_pattern_keywords
+        
+        patterns = []
+        keywords = get_pattern_keywords()
+        action_words = keywords.get('business_logic', [])
+        
+        if any(word in func_name.lower() for word in action_words):
+            pattern_words = "|".join(action_words)
+            patterns.append({
+                'pattern': rf"def\s+({pattern_words})_\w+\s*\(",
+                'type': 'action_pattern',
+                'description': f"Business logic function with action word pattern",
+                'confidence': 0.75
+            })
+        return patterns
+    
+    def _generate_data_processing_patterns(self, func_name: str) -> List[Dict[str, Any]]:
+        """Generate patterns for data processing functions."""
+        from .classification_rules import get_pattern_keywords
+        
+        patterns = []
+        keywords = get_pattern_keywords()
+        data_words = keywords.get('data_processing', [])
+        
+        if any(word in func_name.lower() for word in data_words):
+            pattern_words = "|".join(data_words)
+            patterns.append({
+                'pattern': rf"def\s+({pattern_words})\w*\s*\(",
+                'type': 'data_pattern',
+                'description': f"Data processing function pattern",
+                'confidence': 0.8
+            })
+        return patterns
+    
+    def _generate_validation_patterns(self, func_name: str, function_code: str, last_part: str) -> List[Dict[str, Any]]:
+        """Generate patterns for validation functions."""
+        patterns = []
+        if "return " in function_code and ("True" in function_code or "False" in function_code):
+            patterns.append({
+                'pattern': rf"def\s+.*{last_part}.*\s*\(",
+                'type': 'validation_return',
+                'description': f"Validation function with boolean return",
+                'confidence': 0.7
+            })
         return patterns
     
     async def validate_and_optimize_rules(self, test_functions: List[Tuple[str, str, str]] = None) -> Dict[str, Any]:
