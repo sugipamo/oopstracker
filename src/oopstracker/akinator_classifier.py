@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
 
+from .pattern_generator import PatternGenerator
+
 try:
     from intent_unified.core.semantic_analyzer import SemanticAnalyzer
     LLM_AVAILABLE = True
@@ -75,6 +77,7 @@ class AkinatorClassifier:
         self.rules: List[ClassificationRule] = []
         self.logger = logging.getLogger(__name__)
         self.llm_analyzer = None
+        self.pattern_generator = PatternGenerator()
         
         # Initialize with basic rules
         self._initialize_basic_rules()
@@ -273,23 +276,15 @@ class AkinatorClassifier:
     
     def _generate_smart_patterns(self, func_name: str, function_code: str, category: str) -> List[Dict[str, Any]]:
         """Generate intelligent patterns based on function analysis."""
-        patterns = []
+        # Delegate to pattern generator
+        patterns = self.pattern_generator.generate_smart_patterns(func_name, function_code, category)
         
-        # Analyze function name parts
+        # Analyze function name parts for additional patterns
         name_parts = func_name.split('_')
         first_part = name_parts[0] if name_parts else func_name
-        last_part = name_parts[-1] if name_parts else func_name
-        
-        # Category-specific pattern generation
-        if category == "business_logic":
-            patterns.extend(self._generate_business_logic_patterns(func_name))
-        elif category == "data_processing":
-            patterns.extend(self._generate_data_processing_patterns(func_name))
-        elif category == "validation":
-            patterns.extend(self._generate_validation_patterns(func_name, function_code, last_part))
         
         # Generic pattern based on name structure
-        if len(name_parts) > 1:
+        if len(name_parts) > 1 and not any(p.get('type') == 'name_prefix' for p in patterns):
             patterns.append({
                 'pattern': rf"def\s+{first_part}_\w+\s*\(",
                 'type': 'name_prefix',
@@ -308,53 +303,6 @@ class AkinatorClassifier:
         
         return patterns
     
-    def _generate_business_logic_patterns(self, func_name: str) -> List[Dict[str, Any]]:
-        """Generate patterns for business logic functions."""
-        from .classification_rules import get_pattern_keywords
-        
-        patterns = []
-        keywords = get_pattern_keywords()
-        action_words = keywords.get('business_logic', [])
-        
-        if any(word in func_name.lower() for word in action_words):
-            pattern_words = "|".join(action_words)
-            patterns.append({
-                'pattern': rf"def\s+({pattern_words})_\w+\s*\(",
-                'type': 'action_pattern',
-                'description': f"Business logic function with action word pattern",
-                'confidence': 0.75
-            })
-        return patterns
-    
-    def _generate_data_processing_patterns(self, func_name: str) -> List[Dict[str, Any]]:
-        """Generate patterns for data processing functions."""
-        from .classification_rules import get_pattern_keywords
-        
-        patterns = []
-        keywords = get_pattern_keywords()
-        data_words = keywords.get('data_processing', [])
-        
-        if any(word in func_name.lower() for word in data_words):
-            pattern_words = "|".join(data_words)
-            patterns.append({
-                'pattern': rf"def\s+({pattern_words})\w*\s*\(",
-                'type': 'data_pattern',
-                'description': f"Data processing function pattern",
-                'confidence': 0.8
-            })
-        return patterns
-    
-    def _generate_validation_patterns(self, func_name: str, function_code: str, last_part: str) -> List[Dict[str, Any]]:
-        """Generate patterns for validation functions."""
-        patterns = []
-        if "return " in function_code and ("True" in function_code or "False" in function_code):
-            patterns.append({
-                'pattern': rf"def\s+.*{last_part}.*\s*\(",
-                'type': 'validation_return',
-                'description': f"Validation function with boolean return",
-                'confidence': 0.7
-            })
-        return patterns
     
     async def validate_and_optimize_rules(self, test_functions: List[Tuple[str, str, str]] = None) -> Dict[str, Any]:
         """Validate existing rules and optimize them based on test data.
