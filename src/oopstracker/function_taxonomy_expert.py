@@ -16,6 +16,9 @@ from .akinator_classifier import (
     AkinatorClassifier
 )
 from .progress_manager import ProgressManager
+# REFACTORING: Extracted strategies for better separation of concerns
+from .taxonomy_strategies.pattern_strategy import PatternAnalysisStrategy
+from .taxonomy_strategies.structural_strategy import StructuralAnalysisStrategy
 
 
 @dataclass
@@ -52,7 +55,9 @@ class FunctionTaxonomyExpert:
         
         # Domain services
         self.ai_coordinator = get_ai_coordinator() if enable_ai else None
-        self.pattern_classifier = AkinatorClassifier()
+        # REFACTORING: Using extracted strategy classes instead of internal methods
+        self.pattern_strategy = PatternAnalysisStrategy()
+        self.structural_strategy = StructuralAnalysisStrategy()
         
         # Domain knowledge
         self.classification_history: List[TaxonomyResult] = []
@@ -103,7 +108,8 @@ class FunctionTaxonomyExpert:
                 method_start = asyncio.get_event_loop().time()
                 
                 if method == AnalysisMethod.PATTERN_MATCHING:
-                    result = await self._analyze_with_patterns(function_code, function_name)
+                    # REFACTORING: Using extracted pattern strategy
+                    result = await self.pattern_strategy.analyze(function_code, function_name)
                     analysis_results[method.value] = result
                     used_methods.append(method.value)
                 
@@ -114,7 +120,8 @@ class FunctionTaxonomyExpert:
                     used_methods.append(method.value)
                 
                 elif method == AnalysisMethod.STRUCTURAL_ANALYSIS:
-                    result = await self._analyze_structure(function_code, function_name)
+                    # REFACTORING: Using extracted structural strategy
+                    result = await self.structural_strategy.analyze(function_code, function_name)
                     analysis_results[method.value] = result
                     used_methods.append(method.value)
                 
