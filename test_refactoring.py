@@ -1,64 +1,82 @@
-#!/usr/bin/env python3
-"""Test script to verify the refactored AkinatorClassifier works correctly."""
+"""Test script to verify the refactored semantic detector."""
 
+import asyncio
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, '/home/coding/code-smith/evocraft/packages/oopstracker/src')
 
-from oopstracker.akinator_classifier import AkinatorClassifier
+from oopstracker.models import CodeRecord
+from oopstracker.semantic_detector import SemanticAwareDuplicateDetector
 
 
-def test_basic_classification():
-    """Test basic function classification after refactoring."""
-    classifier = AkinatorClassifier()
+async def test_refactored_detector():
+    """Test the refactored semantic detector."""
+    print("Testing refactored semantic detector...")
     
-    # Test cases
-    test_cases = [
-        ("def get_name(self): return self._name", "get_name", "getter"),
-        ("def set_value(self, val): self.value = val", "set_value", "setter"),
-        ("def __init__(self, name): self.name = name", "__init__", "constructor"),
-        ("def validate_email(email): return '@' in email", "validate_email", "validation"),
+    # Create test code records
+    code_records = [
+        CodeRecord(
+            code_hash="hash1",
+            code_content="""def calculate_sum(a, b):
+    return a + b""",
+            function_name="calculate_sum",
+            file_path="test1.py"
+        ),
+        CodeRecord(
+            code_hash="hash2",
+            code_content="""def add_numbers(x, y):
+    return x + y""",
+            function_name="add_numbers",
+            file_path="test2.py"
+        ),
+        CodeRecord(
+            code_hash="hash3",
+            code_content="""def multiply(a, b):
+    return a * b""",
+            function_name="multiply",
+            file_path="test3.py"
+        )
     ]
     
-    print("Testing AkinatorClassifier after refactoring...")
-    print("-" * 60)
-    
-    for func_code, func_name, expected_category in test_cases:
-        result = classifier.classify_function(func_code, func_name)
-        success = result.category == expected_category
-        
-        print(f"Function: {func_name}")
-        print(f"Expected: {expected_category}")
-        print(f"Actual: {result.category}")
-        print(f"Confidence: {result.confidence}")
-        print(f"Success: {'✓' if success else '✗'}")
-        print("-" * 60)
-
-
-def test_pattern_generation():
-    """Test pattern generation through the new PatternGenerator."""
-    classifier = AkinatorClassifier()
-    
-    # Test pattern generation
-    patterns = classifier._generate_smart_patterns(
-        "process_payment", 
-        "def process_payment(amount): return handle_transaction(amount)",
-        "business_logic"
+    # Initialize detector
+    detector = SemanticAwareDuplicateDetector(
+        intent_unified_available=False,  # Disable for testing
+        enable_intent_tree=False
     )
     
-    print("\nTesting pattern generation...")
-    print("-" * 60)
-    print(f"Generated {len(patterns)} patterns for 'process_payment':")
-    
-    for pattern in patterns:
-        print(f"- Pattern: {pattern.get('pattern', 'N/A')}")
-        print(f"  Type: {pattern.get('type', 'N/A')}")
-        print(f"  Description: {pattern.get('description', 'N/A')}")
-        print(f"  Confidence: {pattern.get('confidence', 'N/A')}")
-        print()
+    try:
+        # Initialize
+        await detector.initialize()
+        print("✅ Initialization successful")
+        
+        # Run duplicate detection
+        results = await detector.detect_duplicates(
+            code_records,
+            enable_semantic=False  # Structural only for testing
+        )
+        
+        print("\n📊 Detection Results:")
+        print(f"- Structural duplicates found: {results['structural_duplicates']['total_found']}")
+        print(f"- High confidence: {len(results['structural_duplicates']['high_confidence'])}")
+        print(f"- Medium confidence: {len(results['structural_duplicates']['medium_confidence'])}")
+        
+        # Test quick semantic check
+        similarity = await detector.quick_semantic_check(
+            code_records[0].code_content,
+            code_records[1].code_content
+        )
+        print(f"\n🔍 Quick semantic check similarity: {similarity}")
+        
+        # Cleanup
+        await detector.cleanup()
+        print("\n✅ Cleanup successful")
+        
+        print("\n✅ All tests passed!")
+        
+    except Exception as e:
+        print(f"\n❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
-    test_basic_classification()
-    test_pattern_generation()
-    print("\nRefactoring test completed!")
+    asyncio.run(test_refactored_detector())
