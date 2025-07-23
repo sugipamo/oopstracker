@@ -1,35 +1,13 @@
-"""
-AST analysis module for structural code analysis.
-Provides modular components for AST parsing and structure extraction.
-"""
+"""AST Analysis Module - Structured code analysis components."""
 
-from .models import CodeUnit, ASTFeatures
-from .extractors import (
-    StructureExtractor,
-    ComplexityExtractor,
-    DependencyExtractor,
-    TypeExtractor
-)
-from .visitors import (
-    FunctionVisitor,
-    ClassVisitor,
-    ControlFlowVisitor,
-    ExpressionVisitor
-)
+from .structure_extractor import ASTStructureExtractor
+from .code_unit import CodeUnit
 from .analyzer import ASTAnalyzer
 from .similarity import SimilarityCalculator
 
 __all__ = [
+    'ASTStructureExtractor',
     'CodeUnit',
-    'ASTFeatures',
-    'StructureExtractor',
-    'ComplexityExtractor',
-    'DependencyExtractor',
-    'TypeExtractor',
-    'FunctionVisitor',
-    'ClassVisitor',
-    'ControlFlowVisitor',
-    'ExpressionVisitor',
     'ASTAnalyzer',
     'SimilarityCalculator'
 ]

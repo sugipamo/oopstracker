@@ -1,134 +1,133 @@
 """
-Similarity calculation for code units based on AST features.
+Similarity Calculator Module
+Calculates structural similarity between code units.
 """
 
 import hashlib
-from typing import List, Tuple
 from collections import Counter
+from typing import List
 
-from .models import CodeUnit
+from .code_unit import CodeUnit
 
 
 class SimilarityCalculator:
-    """Calculates similarity between code units using various metrics."""
+    """
+    Calculates various similarity metrics between code units.
+    """
     
     def calculate_structural_similarity(self, unit1: CodeUnit, unit2: CodeUnit) -> float:
         """
-        Calculate structural similarity between two code units.
-        Returns a score between 0 and 1.
+        Calculate structural similarity between two code units using Bag of Words.
+        
+        Args:
+            unit1: First code unit
+            unit2: Second code unit
+            
+        Returns:
+            Similarity score (0.0 to 1.0)
         """
-        if not unit1.ast_features or not unit2.ast_features:
+        if not unit1.ast_structure or not unit2.ast_structure:
             return 0.0
-            
-        # Compare structure tokens
-        tokens1 = set(unit1.ast_features.structure_tokens)
-        tokens2 = set(unit2.ast_features.structure_tokens)
         
-        if not tokens1 and not tokens2:
-            return 1.0
-        if not tokens1 or not tokens2:
+        # Split structure signatures into tokens and count occurrences
+        tokens1 = Counter(unit1.ast_structure.split('|'))
+        tokens2 = Counter(unit2.ast_structure.split('|'))
+        
+        # Calculate cosine similarity with frequency
+        intersection = sum((tokens1 & tokens2).values())
+        magnitude1 = sum(v * v for v in tokens1.values()) ** 0.5
+        magnitude2 = sum(v * v for v in tokens2.values()) ** 0.5
+        
+        if magnitude1 * magnitude2 == 0:
             return 0.0
-            
-        intersection = tokens1 & tokens2
-        union = tokens1 | tokens2
         
-        jaccard = len(intersection) / len(union) if union else 0
-        
-        # Compare complexity
-        complexity_diff = abs(unit1.ast_features.complexity_score - unit2.ast_features.complexity_score)
-        complexity_similarity = 1 / (1 + complexity_diff * 0.1)
-        
-        # Compare control flow patterns
-        flow1 = set(unit1.ast_features.control_flow_patterns)
-        flow2 = set(unit2.ast_features.control_flow_patterns)
-        
-        flow_similarity = 0.0
-        if flow1 or flow2:
-            flow_intersection = flow1 & flow2
-            flow_union = flow1 | flow2
-            flow_similarity = len(flow_intersection) / len(flow_union) if flow_union else 0
-        
-        # Weighted average
-        similarity = (
-            0.5 * jaccard +
-            0.2 * complexity_similarity +
-            0.3 * flow_similarity
-        )
-        
-        return min(1.0, max(0.0, similarity))
-    
-    def find_similar_units(self, target_unit: CodeUnit, candidate_units: List[CodeUnit], 
-                         threshold: float = 0.8) -> List[Tuple[CodeUnit, float]]:
-        """
-        Find units similar to target unit.
-        Returns list of (unit, similarity_score) tuples.
-        """
-        similar_units = []
-        
-        for candidate in candidate_units:
-            if candidate == target_unit:
-                continue
-                
-            similarity = self.calculate_structural_similarity(target_unit, candidate)
-            
-            if similarity >= threshold:
-                similar_units.append((candidate, similarity))
-        
-        # Sort by similarity descending
-        similar_units.sort(key=lambda x: x[1], reverse=True)
-        
-        return similar_units
+        return intersection / (magnitude1 * magnitude2)
     
     def generate_ast_simhash(self, code_unit: CodeUnit) -> int:
         """
-        Generate SimHash from AST features for fast similarity detection.
-        """
-        if not code_unit.ast_features:
-            return 0
+        Generate SimHash based on AST structure.
+        
+        Args:
+            code_unit: Code unit to generate hash for
             
-        # Combine all features
+        Returns:
+            64-bit SimHash value
+        """
+        if not code_unit.ast_structure:
+            return 0
+        
+        # Use AST structure for SimHash generation
+        structure_text = code_unit.ast_structure
+        
+        # Create weighted features
         features = []
-        features.extend(code_unit.ast_features.structure_tokens)
-        features.extend(code_unit.ast_features.control_flow_patterns)
-        features.extend([f"DEP:{dep}" for dep in code_unit.ast_features.dependencies])
-        features.extend([f"CALL:{call}" for call in code_unit.ast_features.function_calls])
+        for token in structure_text.split('|'):
+            if token.strip():
+                features.append(token.strip())
         
         return self._simhash_from_features(features)
     
     def _simhash_from_features(self, features: List[str]) -> int:
         """
-        Generate SimHash from feature list.
-        """
-        if not features:
-            return 0
+        Generate SimHash from a list of features.
+        
+        Args:
+            features: List of feature strings
             
-        # Initialize bit vector
-        v = [0] * 64
+        Returns:
+            64-bit SimHash value
+        """
+        # Initialize vector
+        vector = [0] * 64
         
         for feature in features:
-            # Hash the feature
-            h = int(hashlib.md5(feature.encode()).hexdigest(), 16)
+            # Get hash for this feature
+            hash_value = int(hashlib.md5(feature.encode()).hexdigest(), 16)
             
-            # Update bit vector
+            # Update vector based on hash bits
             for i in range(64):
-                if h & (1 << i):
-                    v[i] += 1
+                if hash_value & (1 << i):
+                    vector[i] += 1
                 else:
-                    v[i] -= 1
+                    vector[i] -= 1
         
-        # Generate final hash
+        # Convert to final hash
         simhash = 0
         for i in range(64):
-            if v[i] > 0:
+            if vector[i] > 0:
                 simhash |= (1 << i)
-                
+        
         return simhash
     
     def hamming_distance(self, hash1: int, hash2: int) -> int:
-        """Calculate Hamming distance between two hashes."""
+        """
+        Calculate Hamming distance between two SimHash values.
+        
+        Args:
+            hash1: First SimHash value
+            hash2: Second SimHash value
+            
+        Returns:
+            Hamming distance (number of differing bits)
+        """
         xor = hash1 ^ hash2
         distance = 0
         while xor:
             distance += xor & 1
             xor >>= 1
         return distance
+    
+    def simhash_similarity(self, hash1: int, hash2: int) -> float:
+        """
+        Calculate similarity score from SimHash values.
+        
+        Args:
+            hash1: First SimHash value
+            hash2: Second SimHash value
+            
+        Returns:
+            Similarity score (0.0 to 1.0)
+        """
+        distance = self.hamming_distance(hash1, hash2)
+        # Convert distance to similarity (64 is max distance for 64-bit hash)
+        return 1.0 - (distance / 64.0)
