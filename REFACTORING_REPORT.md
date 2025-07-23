@@ -1,30 +1,27 @@
-# Function Group Clustering リファクタリング実施報告
+# リファクタリング実施報告
 
-## 実施内容
-`function_group_clustering.py` (584行) のリファクタリングを実施しました。
+## 対象ファイル
+- ast_simhash_detector_refactored.py (21,023バイト, 523行)
 
-## 適用したリファクタパターン
+## 実施したリファクタリング
 
-### Extract パターン
-1. **データモデルの抽出**
-   - 新規ファイル: `clustering_models.py`
-   - 移動内容: FunctionGroup, ClusterSplitResult, ClusteringStrategy
+### リファクタパターン: Extract (責務の分離)
 
-2. **デモ機能の抽出**
-   - 新規ファイル: `examples/clustering_demo.py`
-   - 89行のコードを独立したサンプルとして分離
+責務が集中していたASTSimHashDetectorRefactoredクラスから、以下の専門コンポーネントを抽出しました：
 
-### Layer パターン (準備)
-- `clustering_strategies/` ディレクトリ構造を作成
-- 戦略パターンの基底クラスを準備
+### 新規作成ファイル
+- detectors.py (490行)
 
-## 成果
-- ファイルサイズ: 584行 → 495行 (15.2%削減)
-- 構造の明確化: データ定義とロジックの分離
-- 拡張性の向上: 戦略パターンの基盤整備
+### 分離したコンポーネント
 
-## 追加で確認した大きなファイル
-- `semantic_analyzer.py` (575行)
-- `code_evolver.py` (602行)
+1. **SimilarityDetector**: コアとなる重複検出ロジック
+2. **SimilarityGraphBuilder**: 類似度グラフの構築
+3. **DetectorCacheManager**: キャッシュメカニズムの管理
+4. **AdaptiveThresholdFinder**: 動的な閾値調整
+5. **StatisticsCollector**: コード統計の収集
+6. **TopPercentDuplicateFinder**: 上位N%の重複コード検出
 
-これらのファイルも同様のアプローチでリファクタリング可能です。
+## 効果
+
+- 単一責任の原則に従い、各クラスが明確な責務を持つようになりました
+- 保守性、テスタビリティ、再利用性が向上しました
