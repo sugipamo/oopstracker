@@ -15,6 +15,7 @@ from .models import CodeRecord
 from .function_taxonomy_expert import FunctionTaxonomyExpert
 from .ai_analysis_coordinator import get_ai_coordinator
 from .clustering_models import FunctionGroup, ClusterSplitResult, ClusteringStrategy
+from .clustering_strategies import ClusteringStrategyFactory
 # Removed circular import - will use lazy import
 
 
@@ -69,14 +70,17 @@ class FunctionGroupClusteringSystem:
     ) -> List[FunctionGroup]:
         """Group functions into clusters based on semantic similarity or categories."""
         
-        if strategy == ClusteringStrategy.CATEGORY_BASED:
-            return await self._cluster_by_category(functions)
-        elif strategy == ClusteringStrategy.SEMANTIC_SIMILARITY:
-            return await self._cluster_by_similarity(functions)
-        elif strategy == ClusteringStrategy.HYBRID:
-            return await self._cluster_hybrid(functions)
-        else:
-            raise ValueError(f"Unsupported clustering strategy: {strategy}")
+        # Use strategy factory to create appropriate strategy
+        clustering_strategy = ClusteringStrategyFactory.create_strategy(
+            strategy_type=strategy,
+            taxonomy_expert=self.taxonomy_expert,
+            min_cluster_size=self.min_cluster_size
+        )
+        
+        # Apply clustering
+        clusters = await clustering_strategy.cluster(functions)
+        self.current_clusters = clusters
+        return clusters
     
     async def hierarchical_cluster_and_classify(
         self,
@@ -132,108 +136,8 @@ class FunctionGroupClusteringSystem:
         self.current_clusters = result_groups
         return result_groups
     
-    async def _cluster_by_category(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
-        """Cluster functions by their classification categories."""
-        
-        # Classify all functions
-        function_data = [(func['code'], func['name']) for func in functions]
-        classification_results = await self.taxonomy_expert.analyze_function_collection(function_data)
-        
-        # Group by category
-        category_groups = defaultdict(list)
-        for i, result in enumerate(classification_results):
-            category = result.primary_category
-            function_with_category = functions[i].copy()
-            function_with_category['category'] = category
-            function_with_category['confidence'] = result.confidence
-            category_groups[category].append(function_with_category)
-        
-        # Create FunctionGroup objects
-        clusters = []
-        for category, group_functions in category_groups.items():
-            if len(group_functions) >= self.min_cluster_size:
-                cluster = FunctionGroup(
-                    group_id=f"category_{category}_{len(clusters)}",
-                    functions=group_functions,
-                    label=f"{category.replace('_', ' ').title()} Functions",
-                    confidence=sum(f['confidence'] for f in group_functions) / len(group_functions),
-                    metadata={
-                        'clustering_strategy': 'category_based',
-                        'category': category,
-                        'function_count': len(group_functions)
-                    }
-                )
-                clusters.append(cluster)
-        
-        self.current_clusters = clusters
-        self.logger.info(f"Created {len(clusters)} category-based clusters")
-        return clusters
-    
-    async def _cluster_by_similarity(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
-        """Cluster functions by semantic similarity (placeholder for future implementation)."""
-        # For now, create simple clusters based on function name patterns
-        pattern_groups = defaultdict(list)
-        
-        for func in functions:
-            name = func['name'].lower()
-            if name.startswith(('get_', 'fetch_', 'load_')):
-                pattern_groups['data_retrieval'].append(func)
-            elif name.startswith(('set_', 'update_', 'save_')):
-                pattern_groups['data_modification'].append(func)
-            elif name.startswith(('validate_', 'check_', 'verify_')):
-                pattern_groups['validation'].append(func)
-            elif name.startswith(('__init__', 'create_', 'build_')):
-                pattern_groups['construction'].append(func)
-            else:
-                pattern_groups['general'].append(func)
-        
-        clusters = []
-        for pattern, group_functions in pattern_groups.items():
-            if len(group_functions) >= self.min_cluster_size:
-                cluster = FunctionGroup(
-                    group_id=f"similarity_{pattern}_{len(clusters)}",
-                    functions=group_functions,
-                    label=f"{pattern.replace('_', ' ').title()} Pattern",
-                    confidence=0.8,  # Heuristic confidence
-                    metadata={
-                        'clustering_strategy': 'semantic_similarity',
-                        'pattern': pattern,
-                        'function_count': len(group_functions)
-                    }
-                )
-                clusters.append(cluster)
-        
-        self.current_clusters = clusters
-        self.logger.info(f"Created {len(clusters)} similarity-based clusters")
-        return clusters
-    
-    async def _cluster_hybrid(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
-        """Combine category and similarity-based clustering."""
-        category_clusters = await self._cluster_by_category(functions)
-        similarity_clusters = await self._cluster_by_similarity(functions)
-        
-        # Simple merge: prefer category-based, fall back to similarity
-        final_clusters = category_clusters
-        
-        # Add similarity clusters for functions not in category clusters
-        categorized_functions = set()
-        for cluster in category_clusters:
-            for func in cluster.functions:
-                categorized_functions.add(func['name'])
-        
-        for sim_cluster in similarity_clusters:
-            uncategorized_functions = [
-                f for f in sim_cluster.functions 
-                if f['name'] not in categorized_functions
-            ]
-            if len(uncategorized_functions) >= self.min_cluster_size:
-                sim_cluster.functions = uncategorized_functions
-                sim_cluster.group_id = f"hybrid_{sim_cluster.group_id}"
-                final_clusters.append(sim_cluster)
-        
-        self.current_clusters = final_clusters
-        self.logger.info(f"Created {len(final_clusters)} hybrid clusters")
-        return final_clusters
+    # Clustering methods moved to clustering_strategies.py to reduce file size
+    # Use ClusteringStrategyFactory in get_current_function_clusters() instead
     
     def select_clusters_that_need_manual_split(
         self, 
