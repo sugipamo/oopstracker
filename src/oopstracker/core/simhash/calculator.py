@@ -95,3 +95,29 @@ class SimHashCalculator:
             distance += xor & 1
             xor >>= 1
         return distance
+    
+    def calc_similarity(self, hash1: int, hash2: int) -> float:
+        """
+        Calculate similarity score between two hashes.
+        
+        Args:
+            hash1: First hash value
+            hash2: Second hash value
+            
+        Returns:
+            Similarity score between 0 and 1 (1 = identical, 0 = completely different)
+        """
+        # Calculate Hamming distance
+        distance = self.hamming_distance(hash1, hash2)
+        
+        # Normalize to 0-1 range
+        normalized_distance = distance / self.hash_size
+        
+        # Convert distance to similarity (inverse relationship)
+        similarity_score = 1.0 - normalized_distance
+        
+        return similarity_score
+    
+    def similarity(self, hash1: int, hash2: int) -> float:
+        """Alias for calc_similarity for backward compatibility."""
+        return self.calc_similarity(hash1, hash2)
