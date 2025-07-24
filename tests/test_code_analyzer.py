@@ -8,24 +8,22 @@ from oopstracker.core.analyzer.code_analyzer import CodeAnalyzer
 class TestCodeAnalyzer:
     """Test cases for CodeAnalyzer class."""
 
-    def test_analyze_empty_code(self):
+    def test_analyze_empty_code(self, code_analyzer):
         """Test analyzing empty code."""
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze("")
+        result = code_analyzer.analyze("")
         
         assert result is not None
         assert "ast" in result
         assert "metrics" in result
         assert "features" in result
 
-    def test_analyze_simple_function(self):
+    def test_analyze_simple_function(self, code_analyzer):
         """Test analyzing a simple function."""
         code = '''
 def hello():
     print("Hello, world!")
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert result["ast"] is not None
         assert isinstance(result["ast"], ast.Module)
@@ -33,7 +31,7 @@ def hello():
         assert len(result["features"]["functions"]) == 1
         assert result["features"]["functions"][0] == "hello"
 
-    def test_analyze_class_definition(self):
+    def test_analyze_class_definition(self, code_analyzer):
         """Test analyzing a class definition."""
         code = '''
 class MyClass:
@@ -43,8 +41,7 @@ class MyClass:
     def get_value(self):
         return self.value
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "classes" in result["features"]
         assert len(result["features"]["classes"]) == 1
@@ -53,22 +50,21 @@ class MyClass:
         assert "__init__" in result["features"]["methods"]
         assert "get_value" in result["features"]["methods"]
 
-    def test_analyze_imports(self):
+    def test_analyze_imports(self, code_analyzer):
         """Test analyzing import statements."""
         code = '''
 import os
 from typing import List, Dict
 import numpy as np
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "imports" in result["features"]
         assert "os" in result["features"]["imports"]
         assert "typing" in result["features"]["imports"]
         assert "numpy" in result["features"]["imports"]
 
-    def test_analyze_metrics(self):
+    def test_analyze_metrics(self, code_analyzer):
         """Test code metrics calculation."""
         code = '''
 def complex_function(x, y):
@@ -80,28 +76,26 @@ def complex_function(x, y):
     else:
         return 0
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "loc" in result["metrics"]  # Lines of code
         assert "complexity" in result["metrics"]  # Cyclomatic complexity
         assert result["metrics"]["loc"] > 0
         assert result["metrics"]["complexity"] > 1
 
-    def test_analyze_syntax_error(self):
+    def test_analyze_syntax_error(self, code_analyzer):
         """Test handling of syntax errors."""
         code = '''
 def broken_function(
     print("This is broken"
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert result is not None
         assert "error" in result
         assert isinstance(result["error"], str)
 
-    def test_analyze_variables(self):
+    def test_analyze_variables(self, code_analyzer):
         """Test variable detection."""
         code = '''
 global_var = 100
@@ -111,13 +105,12 @@ def function():
     another_var = local_var + global_var
     return another_var
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "variables" in result["features"]
         assert "global_var" in result["features"]["variables"]
 
-    def test_analyze_decorators(self):
+    def test_analyze_decorators(self, code_analyzer):
         """Test decorator detection."""
         code = '''
 @property
@@ -128,14 +121,13 @@ def my_property(self):
 def static_method():
     return 42
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "decorators" in result["features"]
         assert "property" in result["features"]["decorators"]
         assert "staticmethod" in result["features"]["decorators"]
 
-    def test_analyze_control_flow(self):
+    def test_analyze_control_flow(self, code_analyzer):
         """Test control flow detection."""
         code = '''
 def control_flow_example(items):
@@ -153,8 +145,7 @@ def control_flow_example(items):
         except Exception:
             break
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "control_flow" in result["features"]
         assert "for" in result["features"]["control_flow"]
@@ -162,7 +153,7 @@ def control_flow_example(items):
         assert "while" in result["features"]["control_flow"]
         assert "try" in result["features"]["control_flow"]
 
-    def test_analyze_nested_structures(self):
+    def test_analyze_nested_structures(self, code_analyzer):
         """Test nested structure analysis."""
         code = '''
 class OuterClass:
@@ -172,8 +163,7 @@ class OuterClass:
                 return 42
             return nested_function()
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
+        result = code_analyzer.analyze(code)
         
         assert "classes" in result["features"]
         assert "OuterClass" in result["features"]["classes"]
@@ -181,44 +171,41 @@ class OuterClass:
         assert "nesting_depth" in result["metrics"]
         assert result["metrics"]["nesting_depth"] > 2
 
-    def test_extract_features_for_similarity(self):
+    def test_extract_features_for_similarity(self, code_analyzer):
         """Test feature extraction for similarity comparison."""
         code = '''
 def calculate_sum(a, b):
     return a + b
 '''
-        analyzer = CodeAnalyzer()
-        features = analyzer.extract_features(code)
+        features = code_analyzer.extract_features(code)
         
         assert isinstance(features, list)
         assert len(features) > 0
         assert any("calculate_sum" in f for f in features)
         assert any("return" in f for f in features)
 
-    def test_get_feature_weights(self):
+    def test_get_feature_weights(self, code_analyzer):
         """Test feature weight calculation."""
         code = '''
 class ImportantClass:
     def critical_method(self):
         return self.important_value
 '''
-        analyzer = CodeAnalyzer()
-        result = analyzer.analyze(code)
-        features = analyzer.extract_features(code)
-        weights = analyzer.get_feature_weights(features, result)
+        result = code_analyzer.analyze(code)
+        features = code_analyzer.extract_features(code)
+        weights = code_analyzer.get_feature_weights(features, result)
         
         assert isinstance(weights, list)
         assert len(weights) == len(features)
         assert all(w > 0 for w in weights)
 
-    def test_normalize_code(self):
+    def test_normalize_code(self, code_analyzer):
         """Test code normalization."""
         code = '''
 def    messy_function(  x,y   ):
         return   x+y  # Comment
 '''
-        analyzer = CodeAnalyzer()
-        normalized = analyzer.normalize_code(code)
+        normalized = code_analyzer.normalize_code(code)
         
         assert normalized is not None
         assert "messy_function" in normalized

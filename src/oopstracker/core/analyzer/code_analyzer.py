@@ -2,6 +2,7 @@
 Code structure analysis and statistics.
 """
 
+import ast
 import logging
 from typing import Dict, List, Optional, Set
 
@@ -186,3 +187,279 @@ class CodeAnalyzer:
         high_complexity.sort(key=lambda x: x["complexity"], reverse=True)
         
         return high_complexity
+    
+    def analyze(self, source_code: str) -> Dict:
+        """
+        Analyze code and return comprehensive analysis results.
+        
+        Args:
+            source_code: Python source code to analyze
+            
+        Returns:
+            Dictionary with ast, metrics, features, and possibly error
+        """
+        result = {
+            "ast": None,
+            "metrics": {},
+            "features": {},
+            "error": None
+        }
+        
+        # Try to parse AST
+        try:
+            tree = ast.parse(source_code)
+            result["ast"] = tree
+        except SyntaxError as e:
+            result["error"] = str(e)
+            return result
+        
+        # Use existing ASTAnalyzer to extract code units
+        units = self.analyzer.parse_code(source_code)
+        
+        # Extract features
+        features = {
+            "functions": [],
+            "classes": [],
+            "methods": [],
+            "imports": [],
+            "variables": [],
+            "decorators": [],
+            "control_flow": []
+        }
+        
+        # Extract features from code units
+        for unit in units:
+            if unit.type == "function":
+                features["functions"].append(unit.name)
+            elif unit.type == "class":
+                features["classes"].append(unit.name)
+            elif unit.type == "method":
+                features["methods"].append(unit.name)
+        
+        # Extract methods from classes
+        class MethodExtractor(ast.NodeVisitor):
+            def __init__(self):
+                self.methods = []
+                self.in_class = False
+                
+            def visit_ClassDef(self, node):
+                old_in_class = self.in_class
+                self.in_class = True
+                self.generic_visit(node)
+                self.in_class = old_in_class
+                
+            def visit_FunctionDef(self, node):
+                if self.in_class:
+                    self.methods.append(node.name)
+                self.generic_visit(node)
+                
+            def visit_AsyncFunctionDef(self, node):
+                if self.in_class:
+                    self.methods.append(node.name)
+                self.generic_visit(node)
+        
+        method_extractor = MethodExtractor()
+        method_extractor.visit(tree)
+        features["methods"] = method_extractor.methods
+        
+        # Extract additional features from AST
+        class FeatureVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.imports = []
+                self.variables = []
+                self.decorators = []
+                self.control_flow = []
+                self.in_function = False
+                self.max_nesting = 0
+                self.current_nesting = 0
+                
+            def visit_Import(self, node):
+                for alias in node.names:
+                    self.imports.append(alias.name.split('.')[0])
+                self.generic_visit(node)
+                    
+            def visit_ImportFrom(self, node):
+                if node.module:
+                    self.imports.append(node.module.split('.')[0])
+                self.generic_visit(node)
+                    
+            def visit_Assign(self, node):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and not self.in_function:
+                        self.variables.append(target.id)
+                self.generic_visit(node)
+                
+            def visit_FunctionDef(self, node):
+                old_in_function = self.in_function
+                self.in_function = True
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Name):
+                        self.decorators.append(decorator.id)
+                    elif isinstance(decorator, ast.Attribute):
+                        self.decorators.append(decorator.attr)
+                self.current_nesting += 1
+                self.max_nesting = max(self.max_nesting, self.current_nesting)
+                self.generic_visit(node)
+                self.current_nesting -= 1
+                self.in_function = old_in_function
+                
+            def visit_ClassDef(self, node):
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Name):
+                        self.decorators.append(decorator.id)
+                    elif isinstance(decorator, ast.Attribute):
+                        self.decorators.append(decorator.attr)
+                self.current_nesting += 1
+                self.max_nesting = max(self.max_nesting, self.current_nesting)
+                self.generic_visit(node)
+                self.current_nesting -= 1
+                    
+            def visit_For(self, node):
+                self.control_flow.append("for")
+                self.generic_visit(node)
+                
+            def visit_While(self, node):
+                self.control_flow.append("while")
+                self.generic_visit(node)
+                
+            def visit_If(self, node):
+                self.control_flow.append("if")
+                self.generic_visit(node)
+                
+            def visit_Try(self, node):
+                self.control_flow.append("try")
+                self.generic_visit(node)
+        
+        visitor = FeatureVisitor()
+        visitor.visit(tree)
+        
+        # Update features
+        features["imports"] = visitor.imports
+        features["variables"] = visitor.variables
+        features["decorators"] = visitor.decorators
+        features["control_flow"] = visitor.control_flow
+        
+        result["features"] = features
+        
+        # Calculate metrics
+        lines = source_code.split('\n')
+        non_empty_lines = [line for line in lines if line.strip()]
+        
+        # Calculate cyclomatic complexity
+        complexity = 1  # Base complexity
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
+                complexity += 1
+            elif isinstance(node, ast.BoolOp):
+                complexity += len(node.values) - 1
+        
+        result["metrics"] = {
+            "loc": len(non_empty_lines),
+            "complexity": complexity,
+            "nesting_depth": visitor.max_nesting
+        }
+        
+        return result
+    
+    def extract_features(self, source_code: str) -> List[str]:
+        """
+        Extract features from code for similarity comparison.
+        
+        Args:
+            source_code: Python source code
+            
+        Returns:
+            List of feature strings
+        """
+        features = []
+        
+        # Use ASTAnalyzer to extract code units
+        units = self.analyzer.parse_code(source_code)
+        
+        # Extract features from code units
+        for unit in units:
+            if unit.type == "function":
+                features.append(f"func:{unit.name}")
+            elif unit.type == "class":
+                features.append(f"class:{unit.name}")
+            
+            # Add structural features from unit
+            if unit.ast_structure:
+                features.extend(unit.ast_structure.split("|"))
+        
+        # Parse AST for additional features
+        try:
+            tree = ast.parse(source_code)
+            
+            # Count function arguments
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    features.append(f"args:{len(node.args.args)}")
+                elif isinstance(node, ast.Return):
+                    features.append("return")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        features.append(f"import:{alias.name}")
+        except SyntaxError:
+            logger.debug("Syntax error during feature extraction")
+        
+        return features
+    
+    def get_feature_weights(self, features: List[str], analysis_result: Dict) -> List[int]:
+        """
+        Calculate weights for features based on their importance.
+        
+        Args:
+            features: List of feature strings
+            analysis_result: Result from analyze() method
+            
+        Returns:
+            List of weights corresponding to features
+        """
+        weights = []
+        
+        for feature in features:
+            weight = 1  # Default weight
+            
+            # Give higher weight to structural elements
+            if feature.startswith('class:'):
+                weight = 3
+            elif feature.startswith('func:'):
+                weight = 2
+            elif feature.startswith('import:'):
+                weight = 1
+            elif feature in ['return', 'if', 'for', 'while']:
+                weight = 1
+            
+            weights.append(weight)
+        
+        return weights
+    
+    def normalize_code(self, source_code: str) -> str:
+        """
+        Normalize code by removing extra whitespace and formatting consistently.
+        
+        Args:
+            source_code: Python source code
+            
+        Returns:
+            Normalized code string
+        """
+        # Parse and unparse to normalize formatting
+        try:
+            tree = ast.parse(source_code)
+            # Convert back to code (note: this removes comments)
+            normalized = ast.unparse(tree)
+            return normalized
+        except (SyntaxError, AttributeError):
+            # If parsing fails or unparse is not available (Python < 3.9)
+            # Just do basic normalization
+            lines = source_code.split('\n')
+            normalized_lines = []
+            for line in lines:
+                # Remove trailing whitespace
+                line = line.rstrip()
+                # Skip empty lines
+                if line:
+                    normalized_lines.append(line)
+            return '\n'.join(normalized_lines)

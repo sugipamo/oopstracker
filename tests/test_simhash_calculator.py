@@ -54,7 +54,7 @@ class TestSimHashCalculator:
         assert hash1 == hash2
 
     def test_hash_sensitivity_to_order(self):
-        """Test that feature order affects hash value."""
+        """Test that feature order doesn't affect hash value with same weights."""
         calculator = SimHashCalculator()
         features1 = ["a", "b", "c"]
         features2 = ["c", "b", "a"]
@@ -63,8 +63,8 @@ class TestSimHashCalculator:
         hash1 = calculator.calculate(features1, weights)
         hash2 = calculator.calculate(features2, weights)
         
-        # SimHash should be order-sensitive
-        assert hash1 != hash2
+        # SimHash should be order-insensitive for same weighted features
+        assert hash1 == hash2
 
     def test_hash_sensitivity_to_weights(self):
         """Test that weights affect hash value."""
