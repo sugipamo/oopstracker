@@ -1,17 +1,21 @@
 # OOPSTracker
 
-コード構造の類似性を検出するためのPythonツール
+AI Agent Code Loop Detection and Prevention Library - コード構造の類似性を検出するためのPythonツール
 
 ## 概要
 
-OOPSTrackerは、Pythonコードの構造的な類似性を検出し、重複コードの発見やリファクタリングの機会を提供するツールです。
+OOPSTrackerは、AIエージェントがコード生成時に同じパターンや類似コードを繰り返し生成することを検出・防止するためのライブラリです。Pythonコードの構造的な類似性を検出し、重複コードの発見やリファクタリングの機会を提供します。AST解析とSimHashアルゴリズムを使用して、高精度な類似性検出を実現します。
 
 ## 主な機能
 
-- コード構造の分析と比較
-- 類似コードパターンの検出
-- 関数・クラス単位での類似性評価
-- 大規模コードベースへの対応
+- **類似コード検出**: AST解析による構造的な類似性検出
+- **SimHashアルゴリズム**: 高速かつ正確な類似性計算
+- **統合検出サービス**: 複数の検出手法を統合した高精度な検出
+- **SQLiteベースの永続化**: コード履歴の効率的な管理
+- **非同期API**: FastAPIを使用した高性能なWeb API
+- **AIエージェント対応**: LLMが生成するコードのループ検出に特化
+- **関数・クラス単位での類似性評価**: 詳細な構造解析
+- **大規模コードベースへの対応**: 効率的なインデックスとキャッシュ
 
 ## インストール
 
@@ -25,6 +29,35 @@ pip install oopstracker
 ```
 
 ## 基本的な使い方
+
+### 統合検出サービスの使用（推奨）
+
+```python
+from oopstracker import UnifiedDetectionService, UnifiedRepository
+
+# リポジトリとサービスの初期化
+repository = UnifiedRepository()
+detector = UnifiedDetectionService(repository)
+
+# コードの類似性チェック
+code = """
+def calculate_sum(a, b):
+    return a + b
+"""
+
+# 類似コードの検出
+similar_codes = await detector.find_similar_codes(code, threshold=0.8)
+
+# コードの記録
+await detector.record_code(
+    code=code,
+    file_path="example.py",
+    intent="数値の加算",
+    context={"function": "calculate_sum"}
+)
+```
+
+### 低レベルAPIの使用
 
 ```python
 from oopstracker import ASTAnalyzer, SimHashCalculator, CodeAnalyzer
@@ -90,6 +123,37 @@ for i, file1 in enumerate(python_files):
                 similar_functions.append((file1, file2, similarity))
 ```
 
+## CLI使用例
+
+```bash
+# 類似コードの検出
+oopstracker analyze your_code.py --threshold 0.8
+
+# コード履歴の表示
+oopstracker history --limit 10
+
+# 統計情報の表示
+oopstracker stats
+
+# プロジェクト全体の分析
+oopstracker scan /path/to/project --output report.json
+```
+
+## API使用例
+
+```bash
+# APIサーバーの起動
+uvicorn oopstracker.api:app --reload
+
+# 類似コードの検出
+curl -X POST http://localhost:8000/detect \
+  -H "Content-Type: application/json" \
+  -d '{"code": "def add(a, b): return a + b"}'
+
+# コード履歴の取得
+curl http://localhost:8000/history?limit=10
+```
+
 ## アーキテクチャ
 
 ### 主要コンポーネント
@@ -97,6 +161,8 @@ for i, file1 in enumerate(python_files):
 1. **ASTAnalyzer**: Pythonコードの構造を解析
 2. **SimHashCalculator**: 類似性計算のためのハッシュ値生成
 3. **CodeAnalyzer**: 統合的なコード分析機能を提供
+4. **UnifiedDetectionService**: 複数の検出手法を統合
+5. **UnifiedRepository**: SQLiteベースのデータ永続化
 
 ### 解析対象
 
@@ -107,6 +173,23 @@ for i, file1 in enumerate(python_files):
 
 ## 設定オプション
 
+### 環境変数
+
+```bash
+# データベース設定
+export OOPSTRACKER_DB_URL="sqlite:///oopstracker.db"
+
+# 検出設定
+export OOPSTRACKER_THRESHOLD=0.8
+export OOPSTRACKER_MAX_HISTORY=1000
+
+# API設定
+export OOPSTRACKER_API_HOST="0.0.0.0"
+export OOPSTRACKER_API_PORT=8000
+```
+
+### プログラムでの設定
+
 ```python
 # SimHashのカスタマイズ
 calculator = SimHashCalculator(hash_size=64)  # ハッシュサイズの調整
@@ -116,6 +199,18 @@ analyzer = CodeAnalyzer(
     ast_analyzer=ast_analyzer,
     simhash_calculator=calculator
 )
+
+# 統合サービスの設定
+from oopstracker.config import Settings
+
+settings = Settings(
+    db_url="sqlite:///custom.db",
+    similarity_threshold=0.85,
+    max_history_size=5000
+)
+
+repository = UnifiedRepository(settings=settings)
+detector = UnifiedDetectionService(repository, settings=settings)
 ```
 
 ## 実用例
@@ -190,12 +285,53 @@ except Exception as e:
     print(f"解析エラー: {e}")
 ```
 
+## 開発
+
+### セットアップ
+
+```bash
+# 開発環境のセットアップ
+cd evocraft
+uv sync --dev
+
+# パッケージのインストール
+uv pip install -e packages/oopstracker
+```
+
+### テスト
+
+```bash
+# 単体テスト
+uv run pytest packages/oopstracker/tests/unit
+
+# 統合テスト
+uv run pytest packages/oopstracker/tests/integration
+
+# カバレッジレポート
+uv run pytest packages/oopstracker --cov=oopstracker --cov-report=html
+```
+
+### コード品質チェック
+
+```bash
+# Ruffによるリンティング
+uv run ruff check packages/oopstracker
+
+# Mypyによる型チェック
+uv run mypy packages/oopstracker
+
+# Blackによるフォーマット
+uv run black packages/oopstracker
+```
+
 ## 今後の拡張予定
 
-- 追加のプログラミング言語サポート
-- より詳細な類似性メトリクス
-- IDE統合プラグイン
+- 追加のプログラミング言語サポート（JavaScript/TypeScript、Go、Rust）
+- より詳細な類似性メトリクス（セマンティック分析）
+- IDE統合プラグイン（VS Code、PyCharm）
 - Web UIの提供
+- クラウドベースの分析サービス
+- GitHubアクションとの統合
 
 ## ライセンス
 
@@ -203,7 +339,13 @@ MIT License
 
 ## コントリビューション
 
-プルリクエストを歓迎します。バグ報告や機能要望はIssueでお知らせください。
+プルリクエストを歓迎します。大きな変更を行う場合は、まずissueを作成して変更内容について議論してください。
+
+1. Forkする
+2. Feature branchを作成する (`git checkout -b feature/amazing-feature`)
+3. 変更をコミットする (`git commit -m 'Add some amazing feature'`)
+4. Branchにpushする (`git push origin feature/amazing-feature`)
+5. Pull Requestを作成する
 
 ## 関連パッケージ
 
