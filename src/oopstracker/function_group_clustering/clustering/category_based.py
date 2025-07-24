@@ -12,15 +12,11 @@ from ...function_taxonomy_expert import FunctionTaxonomyExpert
 class CategoryBasedClustering(ClusterStrategy):
     """Cluster functions by their classification categories."""
     
-    def __init__(self, enable_ai: bool = True):
-        """Initialize category-based clustering.
-        
-        Args:
-            enable_ai: Whether to enable AI-based features
-        """
-        super().__init__(enable_ai)
+    def __init__(self):
+        """Initialize category-based clustering."""
+        super().__init__()
         self.logger = logging.getLogger(__name__)
-        self.taxonomy_expert = FunctionTaxonomyExpert(enable_ai=enable_ai)
+        self.taxonomy_expert = FunctionTaxonomyExpert()
         
     async def cluster(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:
         """Cluster functions by their classification categories.

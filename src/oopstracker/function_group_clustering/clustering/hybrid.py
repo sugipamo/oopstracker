@@ -12,16 +12,12 @@ from ...clustering_models import FunctionGroup
 class HybridClustering(ClusterStrategy):
     """Combine category and similarity-based clustering approaches."""
     
-    def __init__(self, enable_ai: bool = True):
-        """Initialize hybrid clustering.
-        
-        Args:
-            enable_ai: Whether to enable AI-based features
-        """
-        super().__init__(enable_ai)
+    def __init__(self):
+        """Initialize hybrid clustering."""
+        super().__init__()
         self.logger = logging.getLogger(__name__)
-        self.category_strategy = CategoryBasedClustering(enable_ai)
-        self.similarity_strategy = SimilarityBasedClustering(enable_ai)
+        self.category_strategy = CategoryBasedClustering()
+        self.similarity_strategy = SimilarityBasedClustering()
         self.min_cluster_size = 3
         
     async def cluster(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:

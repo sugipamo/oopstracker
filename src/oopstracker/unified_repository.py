@@ -88,6 +88,8 @@ class UnifiedRepository:
         )
         
         success = result.rowcount > 0
+        if success:
+            self.connection_manager.commit()
         return OperationResult(
             success=success,
             affected_rows=result.rowcount,
@@ -206,6 +208,7 @@ class UnifiedRepository:
         ]
         
         cursor.executemany(self.queries['insert_code_record'], insert_data)
+        self.connection_manager.commit()
         
         return OperationResult(True, affected_rows=len(insert_data))
     

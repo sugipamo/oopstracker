@@ -19,7 +19,7 @@ from .group_split_coordinator import GroupSplitCoordinator
 class SmartGroupSplitter:
     """Intelligent splitter that uses domain knowledge to subdivide large groups."""
     
-    def __init__(self, enable_ai: bool = True):
+    def __init__(self):
         # Target size for subdivided groups
         self.target_group_size = 12
         self.max_group_size = 20
@@ -29,7 +29,7 @@ class SmartGroupSplitter:
         
         # Initialize extracted components
         self.rule_repository = SplitRuleRepository()
-        self.llm_service = LLMSplitService(enable_ai=enable_ai)
+        self.llm_service = LLMSplitService()
         self.split_coordinator = GroupSplitCoordinator()
         self.logger = logging.getLogger(__name__)
     
@@ -272,7 +272,7 @@ async def demo_llm_splitting():
     )
     
     # Initialize splitter with AI
-    splitter = SmartGroupSplitter(enable_ai=True)
+    splitter = SmartGroupSplitter()
     
     print(f"Original group: {large_group.label} ({len(large_group.functions)} functions)")
     print(f"Threshold for LLM splitting: {splitter.llm_group_threshold} functions")

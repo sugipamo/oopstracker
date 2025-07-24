@@ -63,8 +63,40 @@ class CheckCommand(BaseCommand):
         
         print(f"🔍 Analyzing {len(files)} Python files...")
         
-        # Perform analysis
-        result = analysis_service.analyze_files(files)
+        # Process files in smaller batches to manage memory and rate limits
+        batch_size = 10  # Reduced batch size to minimize LLM calls
+        total_results = []
+        
+        for i in range(0, len(files), batch_size):
+            batch = files[i:i + batch_size]
+            print(f"Processing batch {i//batch_size + 1}/{(len(files)-1)//batch_size + 1} ({len(batch)} files)")
+            
+            # Add delay between batches to respect rate limits
+            if i > 0:
+                import time
+                print("  Waiting to respect rate limits...")
+                time.sleep(2)  # 2 second delay between batches
+            
+            # Perform analysis on batch
+            result = analysis_service.analyze_files(batch)
+            if not result.success:
+                print(f"❌ Analysis failed on batch {i//batch_size + 1}: {result.error_message}")
+                # Don't fail immediately - continue with remaining batches
+                print("  Continuing with remaining batches...")
+                continue
+                
+            total_results.append(result)
+        
+        # Combine results from all batches
+        if total_results:
+            result = total_results[0]  # Use first result as base
+            for r in total_results[1:]:
+                result.total_files += r.total_files
+                result.processed_records += r.processed_records
+                result.duplicates_found += r.duplicates_found
+                if r.classifications:
+                    for category, count in r.classifications.items():
+                        result.classifications[category] = result.classifications.get(category, 0) + count
         
         if not result.success:
             print(f"❌ Analysis failed: {result.error_message}")
@@ -87,14 +119,21 @@ class CheckCommand(BaseCommand):
         
         return 0
     
-    def _find_python_files(self, path: str) -> list:
-        """Find Python files in path."""
+    def _find_python_files(self, path: str, max_files: int = 1000) -> list:
+        """Find Python files in path with memory safety limit."""
         search_path = Path(path)
         
         if search_path.is_file() and search_path.suffix == '.py':
             return [str(search_path)]
         
         if search_path.is_dir():
-            return [str(p) for p in search_path.rglob('*.py')]
+            # Memory-efficient file discovery with limit
+            files = []
+            for py_file in search_path.rglob('*.py'):
+                files.append(str(py_file))
+                if len(files) >= max_files:
+                    print(f"⚠️  File limit reached: {max_files} files. Use smaller directory or increase limit.")
+                    break
+            return files
         
         return []

@@ -320,11 +320,13 @@ class UnifiedDetectionService:
     """Unified service managing all detection algorithms."""
     
     def __init__(self):
+        # Import pure LLM detector - no pattern matching
+        from .pure_llm_detector import PureLLMDetector
+        
         self.detectors = {
-            "simhash": SimHashDetector(),
-            "exact_match": ExactMatchDetector()
+            "pure_llm": PureLLMDetector()
         }
-        self.default_config = DetectionConfiguration()
+        self.default_config = DetectionConfiguration(algorithm="pure_llm")
     
     def detect_duplicates(self, records: List[CodeRecord], algorithm: str = None, config: DetectionConfiguration = None) -> List[SimilarityResult]:
         """Detect duplicates using specified algorithm."""
@@ -353,6 +355,6 @@ class UnifiedDetectionService:
         algo_name = algorithm or self.default_config.algorithm
         
         if algo_name not in self.detectors:
-            algo_name = "simhash"  # fallback to default
+            algo_name = "pure_llm"  # fallback to pure LLM
         
         return self.detectors[algo_name]

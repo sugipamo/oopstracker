@@ -1,6 +1,6 @@
 # LLM Setup Guide for OOPStracker
 
-OOPStrackerの意味的解析機能を使用するには、LLMサービスが必要です。
+OOPStracker v3.0以降では、LLMサービスが**必須**となりました。意味的解析機能により、コードの本質的な類似性を検出します。
 
 ## 推奨: Ollama を使用する方法
 
@@ -77,8 +77,7 @@ export OOPSTRACKER_LLM_MODEL="gpt-3.5-turbo"
 
 ```bash
 # エラーメッセージ例
-⚠️  Failed to initialize semantic analysis: No LLM service available
-🔄 Falling back to structural analysis only
+RuntimeError: OOPSTRACKER_LLM_MODEL environment variable is required. LLM is mandatory for oopstracker.
 ```
 
 **解決方法**：
@@ -98,13 +97,13 @@ export OOPSTRACKER_LLM_MODEL="gpt-3.5-turbo"
    ollama list
    ```
 
-### 構造解析のみで使用する
+### LLM設定の確認
 
-LLMが利用できない場合でも、構造解析は利用可能です：
+LLMが正しく設定されているか確認：
 
 ```bash
-# LLMを無効化して実行
-uv run oopstracker check --no-semantic
+# 環境変数の確認
+echo $OOPSTRACKER_LLM_MODEL
 ```
 
 ## パフォーマンスの最適化
@@ -139,4 +138,4 @@ OOPStrackerは以下の順序でLLMサービスを検出します：
 4. OpenAI互換 (`http://localhost:8000/v1/chat/completions`)
 5. ハードコードされた開発環境
 
-いずれも見つからない場合は、構造解析のみで動作します。
+いずれも見つからない場合は、エラーとなります。v3.0以降、LLMは必須要件です。

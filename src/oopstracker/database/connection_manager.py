@@ -47,6 +47,9 @@ class DatabaseConnectionManager:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
             
+            # Set busy timeout to 5 seconds to handle concurrent access
+            conn.execute("PRAGMA busy_timeout = 5000")
+            
             logger.info(f"Created database connection: {self.db_path}")
             return conn
             

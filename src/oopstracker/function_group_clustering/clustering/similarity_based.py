@@ -14,14 +14,13 @@ from ...clustering_models import FunctionGroup
 class SimilarityBasedClustering(ClusterStrategy):
     """Cluster functions based on advanced code similarity metrics."""
     
-    def __init__(self, enable_ai: bool = True, similarity_threshold: float = 0.7):
+    def __init__(self, similarity_threshold: float = 0.7):
         """Initialize similarity-based clustering.
         
         Args:
-            enable_ai: Whether to enable AI-based features
             similarity_threshold: Minimum similarity score for clustering
         """
-        super().__init__(enable_ai)
+        super().__init__()
         self.logger = logging.getLogger(__name__)
         self.similarity_threshold = similarity_threshold
         self.min_cluster_size = 3

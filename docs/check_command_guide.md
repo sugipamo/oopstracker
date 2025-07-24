@@ -3,7 +3,7 @@
 ## 最もよく使うコマンド
 
 ```bash
-# カレントディレクトリをチェック（デフォルトで意味的解析も実行）
+# カレントディレクトリをチェック（意味的解析を含む）
 uv run oopstracker check
 
 # 特定のディレクトリをチェック
@@ -13,13 +13,15 @@ uv run oopstracker check src/
 uv run oopstracker check --limit 10
 ```
 
-## デフォルト動作（v2.0以降）
+## デフォルト動作（v3.0以降）
 
 `check`コマンドは以下をデフォルトで実行します：
 
 1. **構造的解析**: AST（抽象構文木）による高速な重複検出
-2. **意味的解析**: LLMを使用した意味的な類似性の判定（自動有効）
+2. **意味的解析**: LLMを使用した意味的な類似性の判定（**必須**）
 3. **自明な重複の除外**: getter/setter、passクラスなどを自動除外
+
+**重要**: v3.0以降、LLMによる意味的解析は必須となりました。`OOPSTRACKER_LLM_MODEL`環境変数の設定が必要です。
 
 ## 主要オプション
 
@@ -46,9 +48,6 @@ uv run oopstracker check --semantic-threshold 0.8
 
 ### パフォーマンス調整
 ```bash
-# 意味的解析を無効化（高速化）
-uv run oopstracker check --no-semantic
-
 # 網羅的な検索（精度優先、低速）
 uv run oopstracker check --exhaustive
 
@@ -100,9 +99,9 @@ uv run oopstracker check
 uv run oopstracker check src/ --pattern "*.py" --limit 20
 ```
 
-### 3. CI/CDでの使用（高速モード）
+### 3. CI/CDでの使用
 ```bash
-uv run oopstracker check --no-semantic --threshold 0.8 --limit 10
+uv run oopstracker check --threshold 0.8 --limit 10
 ```
 
 ### 4. 詳細な解析（時間をかけて精査）
@@ -120,8 +119,9 @@ uv run oopstracker check
 
 ### LLM接続エラー
 ```bash
-# 意味的解析を無効化して実行
-uv run oopstracker check --no-semantic
+# OOPSTRACKER_LLM_MODEL環境変数を設定してください
+export OOPSTRACKER_LLM_MODEL="gpt-4"
+uv run oopstracker check
 ```
 
 ### メモリ不足
@@ -132,8 +132,8 @@ uv run oopstracker check src/module/ --limit 10
 
 ### 実行が遅い
 ```bash
-# 高速モードで実行（精度は下がる可能性）
-uv run oopstracker check --no-semantic --fast
+# ファイル数を制限して実行
+uv run oopstracker check --limit 10
 ```
 
 ## Tips

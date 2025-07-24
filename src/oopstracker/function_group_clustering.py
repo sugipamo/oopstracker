@@ -59,8 +59,7 @@ class ClusterSplitResult:
 class FunctionGroupClusteringSystem:
     """Main system for clustering functions into related groups."""
     
-    def __init__(self, enable_ai: bool = False):
-        self.enable_ai = enable_ai
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
         self._cached_clusters = {}
         
@@ -294,7 +293,7 @@ class FunctionGroupClusteringSystem:
 
 async def demo_clustering_system():
     """Demo the clustering system."""
-    system = FunctionGroupClusteringSystem(enable_ai=True)
+    system = FunctionGroupClusteringSystem()
     
     # Sample functions
     sample_functions = [

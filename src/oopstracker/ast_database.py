@@ -11,9 +11,9 @@ from .models import CodeRecord
 from .ast_analyzer import CodeUnit
 from .database import (
     DatabaseConnectionManager,
-    SchemaManager,
-    FileTrackingRepository,
-    CodeRecordRepository
+    SchemaManager
+    # FileTrackingRepository,  # Not implemented yet
+    # CodeRecordRepository     # Not implemented yet
 )
 
 logger = logging.getLogger(__name__)
@@ -260,6 +260,40 @@ class ASTDatabaseManager:
             return records
         except Exception as e:
             logger.error(f"Failed to load all records: {e}")
+            return []
+    
+    def load_records_batch(self, limit: int = 100, offset: int = 0) -> List[CodeRecord]:
+        """
+        Load code records in batches for memory efficiency.
+        
+        Args:
+            limit: Maximum number of records to return
+            offset: Number of records to skip
+            
+        Returns:
+            List of CodeRecord objects
+        """
+        try:
+            cursor = self.connection_manager.execute(
+                "SELECT id, code_hash, code_content, function_name, file_path, timestamp, simhash, unit_type, start_line, end_line, complexity_score, metadata FROM ast_code_records ORDER BY file_path, start_line LIMIT ? OFFSET ?",
+                (limit, offset)
+            )
+            records = []
+            for row in cursor.fetchall():
+                record = CodeRecord(
+                    id=row[0],
+                    code_hash=row[1],
+                    code_content=row[2],
+                    function_name=row[3],
+                    file_path=row[4],
+                    timestamp=row[5],
+                    simhash=row[6],
+                    metadata={}
+                )
+                records.append(record)
+            return records
+        except Exception as e:
+            logger.error(f"Failed to load batch records: {e}")
             return []
     
     def get_records_by_file(self, file_path: str) -> List[CodeRecord]:

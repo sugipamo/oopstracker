@@ -8,13 +8,9 @@ from ...clustering_models import FunctionGroup
 class ClusterStrategy(ABC):
     """Abstract base class for clustering strategies."""
     
-    def __init__(self, enable_ai: bool = True):
-        """Initialize the clustering strategy.
-        
-        Args:
-            enable_ai: Whether to enable AI-based features
-        """
-        self.enable_ai = enable_ai
+    def __init__(self):
+        """Initialize the clustering strategy."""
+        pass
         
     @abstractmethod
     async def cluster(self, functions: List[Dict[str, Any]]) -> List[FunctionGroup]:

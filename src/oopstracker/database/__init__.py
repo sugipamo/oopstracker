@@ -5,8 +5,10 @@ Provides modular database components.
 
 from .connection_manager import DatabaseConnectionManager
 from .schema_manager import SchemaManager
+from .decorators import with_retry
 
 __all__ = [
     'DatabaseConnectionManager',
-    'SchemaManager'
+    'SchemaManager',
+    'with_retry'
 ]

@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .code_record import CodeRecord
-from .unified_detector import UnifiedDetectionService, DetectionConfiguration
+from .pure_unified_detector import UnifiedDetectionService, DetectionConfiguration
 from .unified_repository import UnifiedRepository, OperationResult
+from .split_rule_repository import SplitRuleRepository
 
 
 @dataclass
@@ -35,9 +36,10 @@ class RefactoredAnalysisService:
     def __init__(self, repository: UnifiedRepository, detector: UnifiedDetectionService):
         self.repository = repository
         self.detector = detector
+        self.rule_repository = SplitRuleRepository()
         self.analysis_cache = {}
     
-    def analyze_files(self, file_paths: List[str], detection_algorithm: str = "simhash") -> AnalysisResult:
+    def analyze_files(self, file_paths: List[str], detection_algorithm: str = "pure_llm") -> AnalysisResult:
         """Analyze files without try-catch blocks."""
         if not file_paths:
             return AnalysisResult(False, error_message="No files provided")
@@ -59,10 +61,22 @@ class RefactoredAnalysisService:
         if not storage_result.success:
             return AnalysisResult(False, error_message=f"Storage error: {storage_result.error_message}")
         
-        # Detect duplicates
+        # Apply rule-based classification first
         all_records = existing_records + new_records
+        classified_records = self._apply_existing_rules(all_records)
+        
+        # Check for large unclassified groups that need LLM analysis
+        large_groups = self._identify_large_groups(classified_records)
+        
+        # Generate new rules with LLM for large groups only
+        if large_groups:
+            new_rules = self._generate_llm_rules_for_groups(large_groups)
+            # Re-apply all rules including new ones
+            classified_records = self._apply_existing_rules(classified_records)
+        
+        # Detect duplicates using efficient algorithm for classified records
         config = DetectionConfiguration(algorithm=detection_algorithm)
-        duplicates = self.detector.detect_duplicates(all_records, detection_algorithm, config)
+        duplicates = self.detector.detect_duplicates(classified_records, detection_algorithm, config)
         
         # Generate classifications
         classifications = self._generate_classifications(all_records)
@@ -75,7 +89,7 @@ class RefactoredAnalysisService:
             classifications=classifications
         )
     
-    def find_similar_code(self, source_code: str, algorithm: str = "simhash") -> AnalysisResult:
+    def find_similar_code(self, source_code: str, algorithm: str = "pure_llm") -> AnalysisResult:
         """Find similar code without try-catch."""
         if not source_code.strip():
             return AnalysisResult(False, error_message="Empty source code provided")
@@ -181,10 +195,97 @@ class RefactoredAnalysisService:
         classifications = {}
         
         for record in records:
-            record_type = record.metadata.get('type', 'unknown') if record.metadata else 'unknown'
+            # Handle metadata safely - it might be a string or dict
+            if hasattr(record, 'metadata') and record.metadata:
+                if isinstance(record.metadata, dict):
+                    record_type = record.metadata.get('type', 'unknown')
+                else:
+                    record_type = 'unknown'  # metadata is string or other type
+            else:
+                record_type = 'unknown'
             classifications[record_type] = classifications.get(record_type, 0) + 1
         
         return classifications
+    
+    def _apply_existing_rules(self, records: List[CodeRecord]) -> List[CodeRecord]:
+        """Apply existing rules to classify records."""
+        rules = self.rule_repository.get_all_rules()
+        if not rules:
+            return records
+        
+        classified_records = []
+        for record in records:
+            # Apply rules to classify the record
+            for rule in rules:
+                if self._rule_matches_record(rule.pattern, record):
+                    # Update record metadata with classification
+                    if hasattr(record, 'metadata') and isinstance(record.metadata, dict):
+                        record.metadata['rule_applied'] = rule.pattern
+                    break
+            classified_records.append(record)
+        
+        return classified_records
+    
+    def _rule_matches_record(self, pattern: str, record: CodeRecord) -> bool:
+        """Check if a rule pattern matches a record."""
+        # Simple pattern matching - can be enhanced
+        import re
+        if hasattr(record, 'function_name') and record.function_name:
+            return bool(re.search(pattern, record.function_name, re.IGNORECASE))
+        return False
+    
+    def _identify_large_groups(self, records: List[CodeRecord], threshold: int = 20) -> List[List[CodeRecord]]:
+        """Identify groups of records that are too large and need LLM analysis."""
+        # Group records by some criteria (e.g., file, similarity)
+        groups = {}
+        for record in records:
+            key = record.file_path or 'unknown'
+            if key not in groups:
+                groups[key] = []
+            groups[key].append(record)
+        
+        # Return groups that exceed threshold
+        large_groups = []
+        for group in groups.values():
+            if len(group) > threshold:
+                large_groups.append(group)
+        
+        return large_groups
+    
+    def _generate_llm_rules_for_groups(self, large_groups: List[List[CodeRecord]]) -> List:
+        """Generate new rules using LLM for large groups."""
+        from .llm_split_service import LLMSplitService
+        
+        if not large_groups:
+            return []
+        
+        llm_service = LLMSplitService()
+        new_rules = []
+        
+        for group in large_groups:
+            # Extract function information for LLM analysis
+            functions = []
+            for record in group:
+                if record.function_name and record.code_content:
+                    functions.append({
+                        'name': record.function_name,
+                        'code': record.code_content[:500],  # Limit code length
+                        'file': record.file_path
+                    })
+            
+            if len(functions) >= 5:  # Only analyze meaningful groups
+                # Use LLM to generate split rules
+                try:
+                    rules = llm_service.generate_split_rules(functions)
+                    for rule in rules:
+                        # Save rule to repository
+                        saved_rule_id = self.rule_repository.save_rule(rule)
+                        new_rules.append(rule)
+                except Exception as e:
+                    print(f"⚠️  LLM rule generation failed for group: {e}")
+                    continue
+        
+        return new_rules
     
     def _dict_to_record(self, data: Dict[str, Any]) -> CodeRecord:
         """Convert dictionary to CodeRecord."""
